@@ -1,9 +1,7 @@
-/**
- * github.com/LevelInteractive/pre-signal
- * Copyright (c) 2026 Level Agency, Inc. All rights reserved.
- */
 class PreSignal
 {
+  static #instance = null;
+
   #cookieName;
   #events;
   #thresholds;
@@ -13,6 +11,12 @@ class PreSignal
 
   constructor(config = {})
   {
+    if (PreSignal.#instance) {
+      console.warn('PreSignal: instance already exists. Returning existing instance.');
+      return PreSignal.#instance;
+    }
+
+    PreSignal.#instance = this;
     this.#cookieName = config.cookieName || '_preSignal';
     this.#events = config.events || {};
     this.#thresholds = this.#sortThresholds(config.thresholds || []);
@@ -66,7 +70,7 @@ class PreSignal
         let payload = args[0];
 
         if (payload.event && _this.#events[payload.event])
-          payload = _this.#scoreEvent(payload, new URL(location.href), payload['gtm.element'] || null);
+          payload = _this.#scoreEvent(payload);
 
         return originalPush.call(_this.#dataLayer, payload);
       }
@@ -86,11 +90,27 @@ class PreSignal
     };
   }
 
-  #scoreEvent(payload, url, element = null)
+  #makeAevObject(payload)
+  {
+    const aev = {
+      element: payload['gtm.element'] || null,
+      text: payload['gtm.elementText'] ? payload['gtm.elementText'].toLowerCase() : null,
+      url: payload['gtm.elementUrl'] ? new URL(payload['gtm.elementUrl']) : null,
+      class: payload['gtm.elementClasses'] || null,
+      id: payload['gtm.elementId'] || null,
+    };
+
+    return aev;
+  }
+
+  #scoreEvent(payload)
   {
     let eventName = payload.event;
     let config = this.#events[eventName];
-    let delta = config.score(payload, url, element);
+
+    payload._aev = this.#makeAevObject(payload);
+
+    let delta = config.score(payload, new URL(location.href));
 
     if (!Number.isInteger(delta)) {
       console.warn(`PreSignal: callback for "${eventName}" did not return an integer. Skipping.`);
@@ -131,7 +151,7 @@ class PreSignal
     if (delta > 0) session.positives += 1;
     if (delta < 0) session.negatives += 1;
 
-    session.threshold = this.#resolveThreshold(this.#toPercentage(session.score));
+    session.threshold = this.#resolveThreshold(this.#toPercentile(session.score));
 
     this.#setSession(session);
 
@@ -148,7 +168,7 @@ class PreSignal
     return Math.min(Math.max(score, 0), this.#maxScore);
   }
 
-  #toPercentage(score)
+  #toPercentile(score)
   {
     return Math.round((score / this.#maxScore) * 100);
   }
@@ -160,12 +180,12 @@ class PreSignal
     return [...thresholds].sort((a, b) => a[1] - b[1]);
   }
 
-  #resolveThreshold(percentage)
+  #resolveThreshold(percentile)
   {
     let matched = null;
 
     for (let [name, min] of this.#thresholds) {
-      if (percentage >= min)
+      if (percentile >= min)
         matched = name;
     }
 
@@ -195,7 +215,7 @@ class PreSignal
     return {
       delta,
       score: session.score,
-      percentage: this.#toPercentage(session.score),
+      percentile: this.#toPercentile(session.score),
       threshold: session.threshold,
       events: {
         positives: session.positives,
