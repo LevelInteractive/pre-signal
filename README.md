@@ -37,7 +37,7 @@ Create a Custom HTML tag in GTM and set it to fire on **All Pages** (or your pre
 <script>
 (function(s,i,g,n,a,l){
 a=i.createElement(g);a.onload=n;a.defer=1;
-a.src="https://cdn.jsdelivr.net/gh/levelinteractive/pre-signal@latest/src/pre-signal.js";
+a.src="https://cdn.jsdelivr.net/gh/levelinteractive/pre-signal@latest/dist/pre-signal.js";
 l=i.getElementsByTagName(g)[0];l.parentNode.insertBefore(a,l);
 })(window, document, 'script', function() {
 

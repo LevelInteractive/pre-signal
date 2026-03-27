@@ -1,16 +1,24 @@
-class PreSignal
-{
-  static #instance = null;
+import type {
+  AevObject,
+  EventConfig,
+  EventScoreCallback,
+  PreSignalConfig,
+  PreSignalPayload,
+  SessionData,
+  Threshold,
+} from './types';
 
-  #cookieName;
-  #events;
-  #thresholds;
-  #maxScore;
-  #dataLayer;
-  #emitting;
+class PreSignal {
+  static #instance: PreSignal | null = null;
 
-  constructor(config = {})
-  {
+  #cookieName!: string;
+  #events!: Record<string, EventConfig>;
+  #thresholds!: Threshold[];
+  #maxScore!: number;
+  #dataLayer!: any[];
+  #emitting!: boolean;
+
+  constructor(config: PreSignalConfig = {}) {
     if (PreSignal.#instance) {
       console.warn('PreSignal: instance already exists. Returning existing instance.');
       return PreSignal.#instance;
@@ -21,7 +29,7 @@ class PreSignal
     this.#events = config.events || {};
     this.#thresholds = this.#sortThresholds(config.thresholds || []);
     this.#maxScore = config.maxScore || 100;
-    this.#dataLayer = window.dataLayer = window.dataLayer || [];
+    this.#dataLayer = (window as any).dataLayer = (window as any).dataLayer || [];
     this.#emitting = false;
 
     if (!this.#getSession())
@@ -32,18 +40,15 @@ class PreSignal
 
   // -- Public API --
 
-  get score()
-  {
+  get score(): SessionData | null {
     return this.#getSession();
   }
 
-  reset()
-  {
+  reset(): void {
     this.#setSession({ score: 0, positives: 0, negatives: 0, total: 0, threshold: null });
   }
 
-  registerEvent(eventName, callback)
-  {
+  registerEvent(eventName: string, callback: EventScoreCallback): void {
     if (typeof callback !== 'function')
       throw new Error(`PreSignal: callback for "${eventName}" must be a function returning an integer.`);
 
@@ -52,18 +57,16 @@ class PreSignal
 
   // -- Core --
 
-  #monkeyPatchPush()
-  {
-    let _this = this;
-    let originalPush = this.#dataLayer.push;
+  #monkeyPatchPush(): void {
+    const _this = this;
+    const originalPush = this.#dataLayer.push;
 
-    this.#dataLayer.push = function ()
-    {
-      let args = arguments;
+    this.#dataLayer.push = function () {
+      const args = arguments;
 
       // If we're emitting a threshold event, pass through to avoid recursion
       if (_this.#emitting)
-        return originalPush.apply(_this.#dataLayer, args);
+        return originalPush.apply(_this.#dataLayer, args as any);
 
       // Handle GTM-style object literal pushes
       if (_this.#isObjectLiteral(args[0])) {
@@ -77,47 +80,43 @@ class PreSignal
 
       // Handle gtag()-style pushes (arguments object)
       if (_this.#isArgumentsObject(args[0])) {
-        let command = args[0];
+        const command = args[0];
 
         if (command[0] === 'event' && command[1] && _this.#events[command[1]])
           _this.#scoreGtagEvent(command);
 
-        return originalPush.apply(_this.#dataLayer, args);
+        return originalPush.apply(_this.#dataLayer, args as any);
       }
 
       // Anything else, pass through untouched
-      return originalPush.apply(_this.#dataLayer, args);
+      return originalPush.apply(_this.#dataLayer, args as any);
     };
   }
 
-  #makeAevObject(payload)
-  {
-    const aev = {
+  #makeAevObject(payload: any): AevObject {
+    return {
       element: payload['gtm.element'] || null,
       text: payload['gtm.elementText'] ? payload['gtm.elementText'].toLowerCase() : null,
       url: payload['gtm.elementUrl'] ? new URL(payload['gtm.elementUrl']) : null,
       class: payload['gtm.elementClasses'] || null,
       id: payload['gtm.elementId'] || null,
     };
-
-    return aev;
   }
 
-  #scoreEvent(payload)
-  {
-    let eventName = payload.event;
-    let config = this.#events[eventName];
+  #scoreEvent(payload: any): any {
+    const eventName = payload.event;
+    const config = this.#events[eventName];
 
     payload._aev = this.#makeAevObject(payload);
 
-    let delta = config.score(payload, new URL(location.href));
+    const delta = config.score(payload, new URL(location.href));
 
     if (!Number.isInteger(delta)) {
       console.warn(`PreSignal: callback for "${eventName}" did not return an integer. Skipping.`);
       return payload;
     }
 
-    let session = this.#updateSession(delta);
+    const session = this.#updateSession(delta);
 
     // Augment the payload with scoring data
     payload._preSignal = this.#buildPayload(delta, session);
@@ -125,12 +124,11 @@ class PreSignal
     return payload;
   }
 
-  #scoreGtagEvent(command)
-  {
-    let eventName = command[1];
-    let params = command[2] || {};
-    let config = this.#events[eventName];
-    let delta = config.score(params);
+  #scoreGtagEvent(command: any): void {
+    const eventName = command[1];
+    const params = command[2] || {};
+    const config = this.#events[eventName];
+    const delta = config.score(params);
 
     if (!Number.isInteger(delta)) {
       console.warn(`PreSignal: callback for "${eventName}" did not return an integer. Skipping.`);
@@ -140,10 +138,9 @@ class PreSignal
     this.#updateSession(delta);
   }
 
-  #updateSession(delta)
-  {
-    let session = this.#getSession();
-    let previousThreshold = session.threshold;
+  #updateSession(delta: number): SessionData {
+    const session = this.#getSession()!;
+    const previousThreshold = session.threshold;
 
     session.score = this.#clamp(session.score + delta);
     session.total += 1;
@@ -163,28 +160,24 @@ class PreSignal
 
   // -- Scoring helpers --
 
-  #clamp(score)
-  {
+  #clamp(score: number): number {
     return Math.min(Math.max(score, 0), this.#maxScore);
   }
 
-  #toPercentile(score)
-  {
+  #toPercentile(score: number): number {
     return Math.round((score / this.#maxScore) * 100);
   }
 
   // -- Thresholds --
 
-  #sortThresholds(thresholds)
-  {
+  #sortThresholds(thresholds: Threshold[]): Threshold[] {
     return [...thresholds].sort((a, b) => a[1] - b[1]);
   }
 
-  #resolveThreshold(percentile)
-  {
-    let matched = null;
+  #resolveThreshold(percentile: number): string | null {
+    let matched: string | null = null;
 
-    for (let [name, min] of this.#thresholds) {
+    for (const [name, min] of this.#thresholds) {
       if (percentile >= min)
         matched = name;
     }
@@ -192,8 +185,7 @@ class PreSignal
     return matched;
   }
 
-  #emitThreshold(delta, session, previousThreshold)
-  {
+  #emitThreshold(delta: number, session: SessionData, previousThreshold: string | null): void {
     this.#emitting = true;
 
     this.#dataLayer.push({
@@ -210,8 +202,7 @@ class PreSignal
     this.#emitting = false;
   }
 
-  #buildPayload(delta, session)
-  {
+  #buildPayload(delta: number, session: SessionData): PreSignalPayload {
     return {
       delta,
       score: session.score,
@@ -227,9 +218,8 @@ class PreSignal
 
   // -- Cookie helpers --
 
-  #getSession()
-  {
-    let raw = this.#getCookie(this.#cookieName);
+  #getSession(): SessionData | null {
+    const raw = this.#getCookie(this.#cookieName);
     if (!raw) return null;
 
     try {
@@ -240,27 +230,39 @@ class PreSignal
     }
   }
 
-  #setSession(data)
-  {
-    let value = encodeURIComponent(JSON.stringify(data));
+  #setSession(data: SessionData): void {
+    const value = encodeURIComponent(JSON.stringify(data));
     document.cookie = `${this.#cookieName}=${value};path=/;SameSite=Lax`;
   }
 
-  #getCookie(name)
-  {
-    let match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+  #getCookie(name: string): string | null {
+    const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
     return match ? match[1] : null;
   }
 
   // -- Type checks --
 
-  #isObjectLiteral(obj)
-  {
+  #isObjectLiteral(obj: any): boolean {
     return obj !== null && typeof obj === 'object' && Object.getPrototypeOf(obj) === Object.prototype;
   }
 
-  #isArgumentsObject(obj)
-  {
+  #isArgumentsObject(obj: any): boolean {
     return Object.prototype.toString.call(obj) === '[object Arguments]';
   }
 }
+
+// Attach to window for script-tag usage
+(window as any).PreSignal = PreSignal;
+
+// ESM export
+export default PreSignal;
+export type {
+  AevObject,
+  EventConfig,
+  EventScoreCallback,
+  PreSignalConfig,
+  PreSignalPayload,
+  SessionData,
+  Threshold,
+  ThresholdPayload,
+} from './types';

@@ -1,0 +1,26 @@
+{
+  "name": "pre-signal",
+  "version": "1.0.0",
+  "description": "A lightweight session engagement scoring utility that monkey-patches the `dataLayer` to score user interactions in real-time. Designed to feed normalized engagement signals back to advertising platforms for value-based bidding and audience quality optimization.",
+  "main": "dist/pre-signal.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LevelInteractive/pre-signal.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/LevelInteractive/pre-signal/issues"
+  },
+  "homepage": "https://github.com/LevelInteractive/pre-signal#readme",
+  "devDependencies": {
+    "esbuild": "^0.27.4",
+    "typescript": "^6.0.2"
+  }
+}
