@@ -4,7 +4,7 @@ A lightweight session engagement scoring utility that monkey-patches the `dataLa
 
 ## How it works
 
-PreSignal intercepts the global `dataLayer.push()` method and scores each event against a configurable set of rules. Every scored event updates a session cookie with a running total, and each `dataLayer.push()` payload is augmented with the current score, percentage, and threshold.
+PreSignal intercepts the global `dataLayer.push()` method and scores each event against a configurable set of rules. Every scored event updates a session cookie with a running total, and each `dataLayer.push()` payload is augmented with the current score, percentile, and threshold.
 
 When a user's engagement crosses a threshold boundary (e.g. `cold` → `warm`), PreSignal emits a `preSignal.threshold` event to the dataLayer — which can be used as a GTM trigger to fire conversion tags, audience signals, or any other downstream action.
 
@@ -91,17 +91,17 @@ Create a **Custom Event** trigger in GTM:
 | Event name | `preSignal.threshold` |
 | Use regex matching | No |
 
-This trigger fires every time a user crosses a threshold boundary. You can access the payload via a **Data Layer Variable** pointed at `_preSignal` to read values like `_preSignal.percentage`, `_preSignal.threshold.name`, or `_preSignal.threshold.previous`.
+This trigger fires every time a user crosses a threshold boundary. You can access the payload via a **Data Layer Variable** pointed at `_preSignal` to read values like `_preSignal.percentile`, `_preSignal.threshold.name`, or `_preSignal.threshold.previous`.
 
 ## Configuration
 
 ### `maxScore`
 
-The ceiling for the raw score. The percentage is calculated as `(score / maxScore) * 100` and clamped between 0–100. Choose a value that represents your ideal engaged session — if your best-case user triggers ~120 points worth of events, set `maxScore: 120`.
+The ceiling for the raw score. The percentile is calculated as `(score / maxScore) * 100` and clamped between 0–100. Choose a value that represents your ideal engaged session — if your best-case user triggers ~120 points worth of events, set `maxScore: 120`.
 
 ### `thresholds`
 
-An array of `[name, percentage]` tuples, where `percentage` is the minimum engagement percentage required to enter that tier. Thresholds are evaluated in ascending order.
+An array of `[name, percentile]` tuples, where `percentile` is the minimum engagement percentile required to enter that tier. Thresholds are evaluated in ascending order.
 
 ```javascript
 thresholds: [
@@ -114,15 +114,14 @@ thresholds: [
 
 ### `events`
 
-An object where each key is a `dataLayer` event name and the value is an object with a `score` callback. The callback receives up to three arguments and must return an integer (positive or negative):
+An object where each key is a `dataLayer` event name and the value is an object with a `score` callback. The callback receives two arguments and must return an integer (positive or negative):
 
 ```javascript
 events: {
   'event_name': {
-    score: function(payload, url, element) {
-      // payload - the dataLayer event object
+    score: function(payload, url) {
+      // payload - the dataLayer event object (with _aev attached, see below)
       // url     - a URL object of the current page
-      // element - the gtm.element if present, otherwise null
       return 10; // must return an integer
     }
   }
@@ -130,6 +129,36 @@ events: {
 ```
 
 Returning a non-integer will log a warning and skip scoring for that event.
+
+### Auto-Event Variables (`_aev`)
+
+Before the `score` callback is invoked, PreSignal attaches a `_aev` object to the payload that normalizes GTM's auto-event variables into a cleaner structure:
+
+| Key | Source | Type |
+|---|---|---|
+| `_aev.element` | `gtm.element` | `HTMLElement \| null` |
+| `_aev.text` | `gtm.elementText` (lowercased) | `string \| null` |
+| `_aev.url` | `gtm.elementUrl` (parsed) | `URL \| null` |
+| `_aev.class` | `gtm.elementClasses` | `string \| null` |
+| `_aev.id` | `gtm.elementId` | `string \| null` |
+
+This lets you write scoring logic against element data without digging into GTM's verbose property names:
+
+```javascript
+'gtm.linkClick': {
+  score: function(payload, url) {
+    // Score outbound links higher
+    if (payload._aev.url && payload._aev.url.hostname !== url.hostname)
+      return 15;
+
+    // Score clicks on CTAs
+    if (payload._aev.class && payload._aev.class.includes('cta'))
+      return 10;
+
+    return 2;
+  }
+}
+```
 
 ### `cookieName`
 
@@ -148,7 +177,7 @@ Every scored GTM-style event gets a `_preSignal` object appended:
   _preSignal: {
     delta: 10,
     score: 45,
-    percentage: 38,
+    percentile: 38,
     threshold: 'warm',
     events: {
       positives: 4,
@@ -169,7 +198,7 @@ Emitted whenever the session crosses a threshold boundary (in either direction):
   _preSignal: {
     delta: 15,
     score: 60,
-    percentage: 50,
+    percentile: 50,
     threshold: 'hot',
     events: {
       positives: 6,
