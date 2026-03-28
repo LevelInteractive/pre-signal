@@ -1,9 +1,13 @@
 import * as esbuild from 'esbuild';
+import pkg from './package.json' with { type: 'json' };
 
 const watch = process.argv.includes('--watch');
 
 const buildOptions = {
   entryPoints: ['src/index.ts'],
+  define: {
+    '__VERSION__': JSON.stringify(pkg.version),
+  },
   bundle: true,
   outfile: 'dist/pre-signal.js',
   format: 'iife',

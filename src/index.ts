@@ -11,6 +11,7 @@ import type {
 class PreSignal
 {
   static #instance: PreSignal | null = null;
+  static #version = __VERSION__;
 
   #cookieName!: string;
   #ctaPatterns!: { text: RegExp | null; classes: RegExp | null; match: 'any' | 'all' };
@@ -38,7 +39,7 @@ class PreSignal
     this.#emitting = false;
 
     if (!this.#getSession())
-      this.#setSession({ score: 0, positives: 0, negatives: 0, total: 0, threshold: null, excluded: false });
+      this.#setSession({ score: 0, positives: 0, negatives: 0, total: 0, threshold: null, excluded: false, v: PreSignal.#version });
 
     this.#monkeyPatchPush();
   }
@@ -48,6 +49,11 @@ class PreSignal
   get score(): SessionData | null
   {
     return this.#getSession();
+  }
+
+  static get version(): string
+  { 
+    return PreSignal.#version; 
   }
 
   reset(): void
@@ -378,10 +384,17 @@ class PreSignal
   #getSession(): SessionData | null
   {
     const raw = this.#getCookie(this.#cookieName);
-    if (!raw) return null;
+    
+    if (!raw) 
+      return null;
 
     try {
-      return JSON.parse(decodeURIComponent(raw));
+      const session = JSON.parse(decodeURIComponent(raw));
+
+      if (session.v !== PreSignal.#version)
+        return null;
+
+      return session;
     } catch (e) {
       console.warn('PreSignal: failed to parse session cookie.', e);
       return null;

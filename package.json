@@ -1,6 +1,6 @@
 {
   "name": "pre-signal",
-  "version": "1.0.0",
+  "version": "1.0.0-alpha.1",
   "description": "A lightweight session engagement scoring utility that monkey-patches the `dataLayer` to score user interactions in real-time. Designed to feed normalized engagement signals back to advertising platforms for value-based bidding and audience quality optimization.",
   "main": "dist/pre-signal.js",
   "scripts": {

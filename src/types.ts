@@ -1,3 +1,5 @@
+declare const __VERSION__: string;
+
 export interface SessionData {
   score: number;
   positives: number;
@@ -5,6 +7,7 @@ export interface SessionData {
   total: number;
   threshold: string | null;
   excluded: boolean;
+  v: string;
 }
 
 export interface PreSignalPayload {
