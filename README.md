@@ -14,12 +14,12 @@ When a user's engagement crosses a threshold boundary (e.g. `cold` → `warm`), 
 
 PreSignal handles both common `dataLayer` push formats:
 
-- **GTM-style object literals** — `dataLayer.push({ event: 'form_submit', ... })` — the payload is augmented with a `_preSignal` object before reaching GTM.
+- **GTM-style object literals** — `dataLayer.push({ event: 'form_submit', ... })` — the payload is augmented with a `preSignal` object before reaching GTM.
 - **gtag()-style arguments** — `gtag('event', 'purchase', { ... })` — the session is scored but the arguments object is passed through unmodified.
 
 ### Session cookie
 
-Session state is stored in a JSON cookie (default: `_preSignal`) with no `max-age` or `expires`, so it expires when the browser session ends. The cookie tracks:
+Session state is stored in a JSON cookie (default: `preSignal`) with no `max-age` or `expires`, so it expires when the browser session ends. The cookie tracks:
 
 | Key | Description |
 |---|---|
@@ -28,6 +28,7 @@ Session state is stored in a JSON cookie (default: `_preSignal`) with no `max-ag
 | `negatives` | Count of events that returned a negative delta |
 | `total` | Total number of scored events |
 | `threshold` | Name of the current threshold (e.g. `'warm'`) |
+| `excluded` | Whether the session has been excluded from scoring |
 
 ## How to use
 
@@ -38,14 +39,12 @@ Create a Custom HTML tag in GTM and set it to fire on **All Pages** (or your pre
 ```html
 <script>
 (function(s,i,g,n,a,l){
-a=i.createElement(g);a.onload=n;a.defer=1;
-a.src="https://cdn.jsdelivr.net/gh/levelinteractive/pre-signal@latest/dist/pre-signal.js";
-l=i.getElementsByTagName(g)[0];l.parentNode.insertBefore(a,l);
-})(window, document, 'script', function() {
-
+  a=i.createElement(g);a.onload=n;a.defer=1;
+  a.src="https://cdn.jsdelivr.net/gh/levelinteractive/pre-signal@"+s+"/dist/pre-signal.js";
+  l=i.getElementsByTagName(g)[0];l.parentNode.insertBefore(a,l);
+})(document, 'script', "latest", function() {
   // We'll initialize our PreSignal instance here in step #2
   // new PreSignal(...);
-
 });
 </script>
 ```
@@ -63,10 +62,11 @@ new PreSignal({
     ['hot',     50],
     ['on_fire', 75],
   ],
-  cta: {
+  ctaPatterns: {
     text: 'get started|sign up|request a demo',
     classes: 'btn|button|cta',
   },
+  exclusions: ['login', 'purchase'],
   events: {
     page_view: { score: 1 },
     cta_click: { score: 10 },
@@ -81,6 +81,9 @@ new PreSignal({
 });
 ```
 
+> [!NOTE]
+> Google Tag Manager doesn't support most ES6/2015 syntax in Custom HTML tags, if you have an LLM try to create a scoring rubric for you make sure you give it that context.
+
 ### 3. Use threshold events in GTM
 
 Create a **Custom Event** trigger in GTM:
@@ -90,7 +93,7 @@ Create a **Custom Event** trigger in GTM:
 | Event name | `preSignal.threshold` |
 | Use regex matching | No |
 
-This trigger fires every time a user crosses a threshold boundary. You can access the payload via a **Data Layer Variable** pointed at `_preSignal` to read values like `_preSignal.percentile`, `_preSignal.threshold.name`, or `_preSignal.threshold.previous`.
+This trigger fires every time a user crosses a threshold boundary. You can access the payload via a **Data Layer Variable** pointed at `preSignal` to read values like `preSignal.percentile`, `preSignal.threshold.name`, or `preSignal.threshold.previous`.
 
 ## Configuration
 
@@ -111,16 +114,33 @@ thresholds: [
 ]
 ```
 
-### `cta`
+### `ctaPatterns`
 
-Optional. Defines patterns for classifying link clicks as CTA clicks. Both fields accept pipe-delimited strings used as case-insensitive regex patterns. If either field matches, the link click is resolved as `cta_click`.
+Optional. Defines patterns for classifying link clicks as CTA clicks. Both fields accept pipe-delimited strings used as case-insensitive regex patterns. By default this is treated as an `OR` via a `match: 'any'` default. You can change it to an `AND` by setting `match: 'all'`. If the pattern match results in `true`, the event is resolved to `cta_click`. 
 
 ```javascript
-cta: {
+ctaPatterns: {
   text: 'get started|sign up|request a demo',  // partial match against link text
-  classes: 'btn|button|cta',                    // partial match against element classes
+  classes: 'btn|button|cta',                   // partial match against element classes
+  match: 'any',                                // Default: 'any' (OR), 'all' (AND)
 }
 ```
+
+### `exclusions`
+
+Optional. An array of resolved event names that should immediately exclude the session from further scoring. When an exclusion event fires, PreSignal:
+
+1. Sets the `excluded` flag on the session cookie
+2. Emits a `preSignal.exclude` event to the dataLayer
+3. Stops scoring all subsequent events for the remainder of the session
+
+This is useful for filtering out sessions where the user has already converted (e.g. logged in, completed a purchase) — signals that make engagement scoring irrelevant.
+
+```javascript
+exclusions: ['login']
+```
+
+The exclusion is permanent for the session. Calling `instance.reset()` will clear the exclusion flag and resume scoring.
 
 ### `events`
 
@@ -148,7 +168,7 @@ Returning a non-integer from a callback will log a warning and skip scoring for 
 
 ### `cookieName`
 
-Optional. Defaults to `'_preSignal'`. The name of the session cookie used to persist the score.
+Optional. Defaults to `'preSignal'`. The name of the session cookie used to persist the score.
 
 ## Auto-Event Resolution
 
@@ -228,13 +248,13 @@ All `score` callbacks receive a `context` object. The properties available depen
 
 ### Augmented dataLayer events
 
-Every scored GTM-style event gets a `_preSignal` object appended:
+Every scored GTM-style event gets a `preSignal` object appended:
 
 ```javascript
 {
   event: 'form_submit',
   // ... original payload ...
-  _preSignal: {
+  preSignal: {
     delta: 10,
     score: 45,
     percentile: 38,
@@ -255,7 +275,7 @@ Emitted whenever the session crosses a threshold boundary (in either direction):
 ```javascript
 {
   event: 'preSignal.threshold',
-  _preSignal: {
+  preSignal: {
     delta: 15,
     score: 60,
     percentile: 50,
@@ -272,6 +292,27 @@ Emitted whenever the session crosses a threshold boundary (in either direction):
 }
 ```
 
+### Exclusion events
+
+Emitted when a session is excluded due to a matching event in the `exclusions` config:
+
+```javascript
+{
+  event: 'preSignal.exclude',
+  preSignal: {
+    delta: 0,
+    score: 30,
+    percentile: 25,
+    threshold: 'warm',
+    events: {
+      positives: 3,
+      negatives: 0,
+      total: 3
+    }
+  }
+}
+```
+
 ## Public API
 
 ### `instance.score`
@@ -280,7 +321,7 @@ Getter that returns the current session object from the cookie.
 
 ```javascript
 let session = ps.score;
-// { score: 45, positives: 4, negatives: 1, total: 5, threshold: 'warm' }
+// { score: 45, positives: 4, negatives: 1, total: 5, threshold: 'warm', excluded: false }
 ```
 
 ### `instance.reset()`

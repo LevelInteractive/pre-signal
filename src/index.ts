@@ -13,7 +13,7 @@ class PreSignal
   static #instance: PreSignal | null = null;
 
   #cookieName!: string;
-  #ctaPatterns!: { text: RegExp | null; classes: RegExp | null };
+  #ctaPatterns!: { text: RegExp | null; classes: RegExp | null; match: 'any' | 'all' };
   #events!: Record<string, EventConfig>;
   #exclusions!: Set<string>;
   #thresholds!: Threshold[];
@@ -29,7 +29,7 @@ class PreSignal
 
     PreSignal.#instance = this;
     this.#cookieName = config.cookieName || '_preSignal';
-    this.#ctaPatterns = this.#compileCtaPatterns(config.cta);
+    this.#ctaPatterns = this.#compileCtaPatterns(config.ctaPatterns);
     this.#events = config.events || {};
     this.#exclusions = new Set(config.exclusions || []);
     this.#thresholds = this.#sortThresholds(config.thresholds || []);
@@ -250,7 +250,7 @@ class PreSignal
 
     if (this.#exclusions.has(resolved.event)) {
       this.#excludeSession(session);
-      targetParams._preSignal = this.#buildPayload(0, session);
+      targetParams.preSignal = this.#buildPayload(0, session);
       return payload;
     }
 
@@ -270,7 +270,7 @@ class PreSignal
 
     const updatedSession = this.#updateSession(delta);
 
-    targetParams._preSignal = this.#buildPayload(delta, updatedSession);
+    targetParams.preSignal = this.#buildPayload(delta, updatedSession);
 
     return payload;
   }
@@ -349,7 +349,7 @@ class PreSignal
 
     this.#dataLayer.push({
       event: 'preSignal.exclude',
-      _preSignal: this.#buildPayload(0, session),
+      preSignal: this.#buildPayload(0, session),
     });
 
     this.#emitting = false;
@@ -361,7 +361,7 @@ class PreSignal
 
     this.#dataLayer.push({
       event: 'preSignal.threshold',
-      _preSignal: {
+      preSignal: {
         ...this.#buildPayload(delta, session),
         threshold: {
           name: session.threshold,
@@ -417,23 +417,24 @@ class PreSignal
     return Object.prototype.toString.call(obj) === '[object Arguments]';
   }
 
-  #compileCtaPatterns(cta?: CtaConfig): { text: RegExp | null; classes: RegExp | null }
+  #compileCtaPatterns(cta?: CtaConfig): { text: RegExp | null; classes: RegExp | null; match: 'any' | 'all' }
   {
     return {
       text: cta?.text ? new RegExp(cta.text, 'i') : null,
       classes: cta?.classes ? new RegExp(cta.classes, 'i') : null,
+      match: cta?.match || 'any',
     };
   }
 
   #isCtaClick(context: any): boolean
   {
-    if (this.#ctaPatterns.text?.test(context.element.text || ''))
-      return true;
+    const textMatch = this.#ctaPatterns.text?.test(context.element.text || '') ?? false;
+    const classMatch = this.#ctaPatterns.classes?.test(context.element.classes || '') ?? false;
 
-    if (this.#ctaPatterns.classes?.test(context.element.classes || ''))
-      return true;
+    if (this.#ctaPatterns.match === 'all')
+      return textMatch && classMatch;
 
-    return false;
+    return textMatch || classMatch;
   }
 
   #isOutboundLink(linkHostname: string): boolean

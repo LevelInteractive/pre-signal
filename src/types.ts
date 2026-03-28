@@ -37,11 +37,12 @@ export interface EventConfig {
 export interface CtaConfig {
   text?: string;
   classes?: string;
+  match?: 'any' | 'all';
 }
 
 export interface PreSignalConfig {
   cookieName?: string;
-  cta?: CtaConfig;
+  ctaPatterns?: CtaConfig;
   events?: Record<string, EventConfig>;
   exclusions?: string[];
   thresholds?: Threshold[];
