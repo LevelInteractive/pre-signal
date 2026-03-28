@@ -436,7 +436,6 @@ class PreSignal
 // ESM export
 export default PreSignal;
 export type {
-  AevObject,
   CtaConfig,
   EventConfig,
   EventScoreCallback,
