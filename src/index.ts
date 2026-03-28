@@ -1,4 +1,5 @@
 import type {
+  CtaConfig,
   EventConfig,
   EventScoreCallback,
   PreSignalConfig,
@@ -7,17 +8,20 @@ import type {
   Threshold,
 } from './types';
 
-class PreSignal {
+class PreSignal
+{
   static #instance: PreSignal | null = null;
 
   #cookieName!: string;
+  #ctaPatterns!: { text: RegExp | null; classes: RegExp | null };
   #events!: Record<string, EventConfig>;
   #thresholds!: Threshold[];
   #maxScore!: number;
   #dataLayer!: any[];
   #emitting!: boolean;
 
-  constructor(config: PreSignalConfig = {}) {
+  constructor(config: PreSignalConfig = {})
+  {
     if (PreSignal.#instance) {
       console.warn('PreSignal: instance already exists. Returning existing instance.');
       return PreSignal.#instance;
@@ -25,6 +29,7 @@ class PreSignal {
 
     PreSignal.#instance = this;
     this.#cookieName = config.cookieName || '_preSignal';
+    this.#ctaPatterns = this.#compileCtaPatterns(config.cta);
     this.#events = config.events || {};
     this.#thresholds = this.#sortThresholds(config.thresholds || []);
     this.#maxScore = config.maxScore || 100;
@@ -39,24 +44,28 @@ class PreSignal {
 
   // -- Public API --
 
-  get score(): SessionData | null {
+  get score(): SessionData | null
+  {
     return this.#getSession();
   }
 
-  reset(): void {
+  reset(): void
+  {
     this.#setSession({ score: 0, positives: 0, negatives: 0, total: 0, threshold: null });
   }
 
-  registerEvent(eventName: string, callback: EventScoreCallback): void {
-    if (typeof callback !== 'function')
-      throw new Error(`PreSignal: callback for "${eventName}" must be a function returning an integer.`);
+  registerEvent(eventName: string, score: EventScoreCallback | number): void
+  {
+    if (typeof score !== 'function' && !Number.isInteger(score))
+      throw new Error(`PreSignal: score for "${eventName}" must be a function or an integer.`);
 
-    this.#events[eventName] = { score: callback };
+    this.#events[eventName] = { score };
   }
 
   // -- Core --
 
-  #monkeyPatchPush(): void {
+  #monkeyPatchPush(): void
+  {
     const _this = this;
     const originalPush = this.#dataLayer.push;
 
@@ -88,7 +97,8 @@ class PreSignal {
     };
   }
 
-  #pluckFromPayload(namespace: string, payload: any, keys: string[]): Record<string, any> {
+  #pluckFromPayload(namespace: string, payload: any, keys: string[]): Record<string, any>
+  {
     const result: Record<string, any> = {};
     
     keys.forEach(key => {
@@ -99,7 +109,8 @@ class PreSignal {
     return result;
   }
 
-  #resolveLinkClickEvent(context: any): string | null {
+  #resolveLinkClickEvent(context: any): string | null
+  {
     const link_click = 'link_click';
 
     if (context.element.url?.protocol === 'mailto:')
@@ -116,15 +127,14 @@ class PreSignal {
       /\.(?:pdf|xlsx?|docx?|txt|rtf|csv|exe|key|pp(?:s|t|tx)|7z|pkg|rar|gz|zip|avi|mov|mp4|mpe?g|wmv|midi?|mp3|wav|wma)$/.test(context.element.url?.pathname || '')
     ) return 'file_download';
 
-    // cta_click
-    // we need a way to define what a "CTA" looks like in the config. 
-    // for example, we could allow the user to specify patterns for text and class names that indicate a CTA.
+    if (this.#isCtaClick(context))
+      return 'cta_click';
 
     return null;
   }
 
-  #resolveEvent(payload: any) {
-
+  #resolveEvent(payload: any)
+  {
     if (! payload.event.startsWith('gtm.'))
       return {event: payload.event, payload};
 
@@ -145,6 +155,9 @@ class PreSignal {
         'Classes',
       ])
     );
+
+    if (context.element.text)
+      context.element.text = context.element.text.trim().toLowerCase();
 
     switch (event) {
 
@@ -197,13 +210,11 @@ class PreSignal {
 
     }
 
-    console.log('Resolving GTM event:', event, context);
-
     return {event, context};
-
   }
 
-  #scoreEvent(payload: any, format: 'gtm' | 'gtag'): any {
+  #scoreEvent(payload: any, format: 'gtm' | 'gtag'): any
+  {
     let eventName: string;
     let targetParams: any;
 
@@ -230,14 +241,18 @@ class PreSignal {
 
     const config = this.#events[resolved.event];
 
+    console.log('Event config:', config);
+
     if (!config)
       return payload;
 
-    const delta = config.score(resolved.context);
+    const delta = typeof config.score === 'function'
+      ? config.score(resolved.context)
+      : config.score;
 
     if (!Number.isInteger(delta)) {
-      console.warn(`PreSignal: callback for "${eventName}" did not return an integer. Skipping.`);
-      return payload; 
+      console.warn(`PreSignal: score for "${eventName}" must resolve to an integer. Skipping.`);
+      return payload;
     }
 
     const session = this.#updateSession(delta);
@@ -247,7 +262,8 @@ class PreSignal {
     return payload;
   }
 
-  #updateSession(delta: number): SessionData {
+  #updateSession(delta: number): SessionData
+  {
     const session = this.#getSession()!;
     const previousThreshold = session.threshold;
 
@@ -269,21 +285,25 @@ class PreSignal {
 
   // -- Scoring helpers --
 
-  #clamp(score: number): number {
+  #clamp(score: number): number
+  {
     return Math.min(Math.max(score, 0), this.#maxScore);
   }
 
-  #toPercentile(score: number): number {
+  #toPercentile(score: number): number
+  {
     return Math.round((score / this.#maxScore) * 100);
   }
 
   // -- Thresholds --
 
-  #sortThresholds(thresholds: Threshold[]): Threshold[] {
+  #sortThresholds(thresholds: Threshold[]): Threshold[]
+  {
     return [...thresholds].sort((a, b) => a[1] - b[1]);
   }
 
-  #resolveThreshold(percentile: number): string | null {
+  #resolveThreshold(percentile: number): string | null
+  {
     let matched: string | null = null;
 
     for (const [name, min] of this.#thresholds) {
@@ -294,7 +314,8 @@ class PreSignal {
     return matched;
   }
 
-  #emitThreshold(delta: number, session: SessionData, previousThreshold: string | null): void {
+  #emitThreshold(delta: number, session: SessionData, previousThreshold: string | null): void
+  {
     this.#emitting = true;
 
     this.#dataLayer.push({
@@ -311,7 +332,8 @@ class PreSignal {
     this.#emitting = false;
   }
 
-  #buildPayload(delta: number, session: SessionData): PreSignalPayload {
+  #buildPayload(delta: number, session: SessionData): PreSignalPayload
+  {
     return {
       delta,
       score: session.score,
@@ -327,7 +349,8 @@ class PreSignal {
 
   // -- Cookie helpers --
 
-  #getSession(): SessionData | null {
+  #getSession(): SessionData | null
+  {
     const raw = this.#getCookie(this.#cookieName);
     if (!raw) return null;
 
@@ -339,19 +362,22 @@ class PreSignal {
     }
   }
 
-  #setSession(data: SessionData): void {
+  #setSession(data: SessionData): void
+  {
     const value = encodeURIComponent(JSON.stringify(data));
     document.cookie = `${this.#cookieName}=${value};path=/;SameSite=Lax`;
   }
 
-  #getCookie(name: string): string | null {
+  #getCookie(name: string): string | null
+  {
     const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
     return match ? match[1] : null;
   }
 
   // -- Type checks --
 
-  #isObjectLiteral(obj: any): boolean {
+  #isObjectLiteral(obj: any): boolean
+  {
     return (
       obj !== null && 
       typeof obj === 'object' && 
@@ -360,11 +386,32 @@ class PreSignal {
     );
   }
 
-  #isArgumentsObject(obj: any): boolean {
+  #isArgumentsObject(obj: any): boolean
+  {
     return Object.prototype.toString.call(obj) === '[object Arguments]';
   }
 
-  #isOutboundLink(linkHostname: string): boolean {
+  #compileCtaPatterns(cta?: CtaConfig): { text: RegExp | null; classes: RegExp | null }
+  {
+    return {
+      text: cta?.text ? new RegExp(cta.text, 'i') : null,
+      classes: cta?.classes ? new RegExp(cta.classes, 'i') : null,
+    };
+  }
+
+  #isCtaClick(context: any): boolean
+  {
+    if (this.#ctaPatterns.text?.test(context.element.text || ''))
+      return true;
+
+    if (this.#ctaPatterns.classes?.test(context.element.classes || ''))
+      return true;
+
+    return false;
+  }
+
+  #isOutboundLink(linkHostname: string): boolean
+  {
     try {
       const currentHost = location.hostname;
 
@@ -390,6 +437,7 @@ class PreSignal {
 export default PreSignal;
 export type {
   AevObject,
+  CtaConfig,
   EventConfig,
   EventScoreCallback,
   PreSignalConfig,

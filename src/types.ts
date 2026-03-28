@@ -30,11 +30,17 @@ export type Threshold = [string, number];
 export type EventScoreCallback = (payload: any, url?: URL) => number;
 
 export interface EventConfig {
-  score: EventScoreCallback;
+  score: EventScoreCallback | number;
+}
+
+export interface CtaConfig {
+  text?: string;
+  classes?: string;
 }
 
 export interface PreSignalConfig {
   cookieName?: string;
+  cta?: CtaConfig;
   events?: Record<string, EventConfig>;
   thresholds?: Threshold[];
   maxScore?: number;

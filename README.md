@@ -61,23 +61,20 @@ new PreSignal({
     ['hot',     50],
     ['on_fire', 75],
   ],
+  cta: {
+    text: 'get started|sign up|request a demo',
+    classes: 'btn|button|cta',
+  },
   events: {
-    'gtm.load': {
-      score: function(payload, url) { 
-        return 1; 
+    page_view: { score: 1 },
+    cta_click: { score: 10 },
+    file_download: { score: 5 },
+    scroll: {
+      score: function(context) {
+        return context.scroll.threshold >= 50 ? 3 : 1;
       }
     },
-    'gtm.linkClick': {
-      score: function(payload, url, element) { 
-        console.dir(payload, url, element);
-        return 10; 
-      }
-    },
-    'lvl.form_submit': {
-      score: function(payload, url) { 
-        return 100; 
-      }
-    },
+    form_submit: { score: 100 },
   }
 });
 ```
@@ -112,57 +109,118 @@ thresholds: [
 ]
 ```
 
+### `cta`
+
+Optional. Defines patterns for classifying link clicks as CTA clicks. Both fields accept pipe-delimited strings used as case-insensitive regex patterns. If either field matches, the link click is resolved as `cta_click`.
+
+```javascript
+cta: {
+  text: 'get started|sign up|request a demo',  // partial match against link text
+  classes: 'btn|button|cta',                    // partial match against element classes
+}
+```
+
 ### `events`
 
-An object where each key is a `dataLayer` event name and the value is an object with a `score` callback. The callback receives two arguments and must return an integer (positive or negative):
+An object where each key is an event name (see [Auto-Event Resolution](#auto-event-resolution)) and the value is an object with a `score` property. The `score` can be either:
+
+- **An integer** — a static score applied every time the event fires.
+- **A callback function** — receives a `context` object and must return an integer (positive or negative).
 
 ```javascript
 events: {
-  'event_name': {
-    score: function(payload, url) {
-      // payload - the dataLayer event object (with _aev attached, see below)
-      // url     - a URL object of the current page
-      return 10; // must return an integer
+  // Static integer score
+  page_view: { score: 1 },
+  cta_click: { score: 10 },
+
+  // Callback for conditional scoring
+  scroll: {
+    score: function(context) {
+      return context.scroll.threshold >= 75 ? 5 : 1;
     }
   }
 }
 ```
 
-Returning a non-integer will log a warning and skip scoring for that event.
-
-### Auto-Event Variables (`_aev`)
-
-Before the `score` callback is invoked, PreSignal attaches a `_aev` object to the payload that normalizes GTM's auto-event variables into a cleaner structure:
-
-| Key | Source | Type |
-|---|---|---|
-| `_aev.element` | `gtm.element` | `HTMLElement \| null` |
-| `_aev.text` | `gtm.elementText` (lowercased) | `string \| null` |
-| `_aev.url` | `gtm.elementUrl` (parsed) | `URL \| null` |
-| `_aev.class` | `gtm.elementClasses` | `string \| null` |
-| `_aev.id` | `gtm.elementId` | `string \| null` |
-
-This lets you write scoring logic against element data without digging into GTM's verbose property names:
-
-```javascript
-'gtm.linkClick': {
-  score: function(payload, url) {
-    // Score outbound links higher
-    if (payload._aev.url && payload._aev.url.hostname !== url.hostname)
-      return 15;
-
-    // Score clicks on CTAs
-    if (payload._aev.class && payload._aev.class.includes('cta'))
-      return 10;
-
-    return 2;
-  }
-}
-```
+Returning a non-integer from a callback will log a warning and skip scoring for that event.
 
 ### `cookieName`
 
 Optional. Defaults to `'_preSignal'`. The name of the session cookie used to persist the score.
+
+## Auto-Event Resolution
+
+PreSignal automatically resolves GTM auto-events (`gtm.*`) into more descriptive event names. When registering events in the `events` config, use the **resolved** names below — not the raw GTM event names.
+
+During resolution, relevant auto-event variables are extracted from the dataLayer payload and organized into a `context` object that is passed to `score` callbacks.
+
+### Resolved event names
+
+| GTM Event | Resolved Name | Context Properties |
+|---|---|---|
+| `gtm.load` | `page_view` | `context.url` |
+| `gtm.historyChange-v2` | `page_view` | `context.url` |
+| `gtm.linkClick` | See [Link Click Resolution](#link-click-resolution) | `context.url`, `context.element` |
+| `gtm.video` | `video_{status}` (e.g. `video_start`, `video_complete`) | `context.url`, `context.video` |
+| `gtm.scrollDepth` | `scroll` | `context.url`, `context.scroll` |
+| `gtm.elementVisibility` | `element_impression` | `context.url`, `context.impression` |
+
+Non-GTM events (e.g. custom `dataLayer.push({ event: 'form_submit' })`) pass through with their original name. If a `gtm.*` event doesn't resolve to a named event (e.g. an unclassified `gtm.linkClick`), the raw `gtm.*` event name is used to look up the scoring config — so you can still register a handler for `'gtm.linkClick'` as a catch-all for link clicks that don't match any specific classification.
+
+### Link click resolution
+
+`gtm.linkClick` events are further classified based on the link's attributes:
+
+| Resolved Name | Condition |
+|---|---|
+| `email_link_click` | `mailto:` protocol |
+| `phone_link_click` | `tel:` protocol |
+| `outbound_link_click` | Link hostname differs from the current site's root domain |
+| `file_download` | Link has a `download` attribute, or pathname ends with a known file extension (pdf, docx, xlsx, zip, mp4, etc.) |
+| `cta_click` | Link text or classes match the patterns defined in the [`cta`](#cta) config |
+
+If none of the above match, the event remains as `gtm.linkClick`.
+
+### Context object
+
+All `score` callbacks receive a `context` object. The properties available depend on the event type:
+
+**`context.url`** — always present. A `URL` object of the current page.
+
+**`context.element`** — present for link click events.
+
+| Property | Description |
+|---|---|
+| `context.element.node` | The DOM element that was clicked |
+| `context.element.url` | Parsed `URL` object of the link href |
+| `context.element.text` | The link's text content (lowercased) |
+| `context.element.classes` | The element's class attribute |
+
+**`context.video`** — present for video events.
+
+| Property | Description |
+|---|---|
+| `context.video.title` | Video title |
+| `context.video.provider` | Video provider (e.g. `'youtube'`) |
+| `context.video.percent` | Playback percentage |
+| `context.video.status` | Video status (e.g. `'start'`, `'progress'`, `'complete'`) |
+
+**`context.scroll`** — present for scroll events.
+
+| Property | Description |
+|---|---|
+| `context.scroll.threshold` | Scroll depth threshold that was crossed |
+| `context.scroll.units` | Unit of measurement (e.g. `'percent'`) |
+| `context.scroll.direction` | Scroll direction |
+
+**`context.impression`** — present for element visibility events.
+
+| Property | Description |
+|---|---|
+| `context.impression.ratio` | Visible ratio of the element |
+| `context.impression.time` | Time visible |
+| `context.impression.firsttime` | Whether this is the first impression |
+| `context.impression.lasttime` | Last time the element was visible |
 
 ## Event payloads
 
@@ -172,7 +230,7 @@ Every scored GTM-style event gets a `_preSignal` object appended:
 
 ```javascript
 {
-  event: 'gtm.linkClick',
+  event: 'form_submit',
   // ... original payload ...
   _preSignal: {
     delta: 10,
@@ -199,7 +257,6 @@ Emitted whenever the session crosses a threshold boundary (in either direction):
     delta: 15,
     score: 60,
     percentile: 50,
-    threshold: 'hot',
     events: {
       positives: 6,
       negatives: 1,
@@ -228,12 +285,14 @@ let session = ps.score;
 
 Resets the session cookie to zero.
 
-### `instance.registerEvent(eventName, callback)`
+### `instance.registerEvent(eventName, score)`
 
-Register an event after initialization:
+Register an event after initialization. The `score` argument can be a function or an integer.
 
 ```javascript
-ps.registerEvent('video_complete', function(payload, url) {
-  return 5;
+ps.registerEvent('video_complete', 5);
+
+ps.registerEvent('scroll', function(context) {
+  return context.scroll.threshold >= 90 ? 10 : 2;
 });
 ```
