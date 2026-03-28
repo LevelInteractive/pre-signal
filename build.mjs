@@ -1,14 +1,24 @@
 import * as esbuild from 'esbuild';
 
-await esbuild.build({
+const watch = process.argv.includes('--watch');
+
+const buildOptions = {
   entryPoints: ['src/index.ts'],
   bundle: true,
   outfile: 'dist/pre-signal.js',
   format: 'iife',
   target: 'es2022',
-  minify: true,
-  mangleProps: /^#/,
-  sourcemap: false,
-});
+  minify: !watch,
+  mangleProps: watch ? undefined : /^#/,
+  sourcemap: watch ? 'inline' : false,
+  drop: watch ? [] : ['console'],
+};
 
-console.log('Build complete: dist/pre-signal.js');
+if (watch) {
+  const ctx = await esbuild.context(buildOptions);
+  await ctx.watch();
+  console.log('Watching for changes...');
+} else {
+  await esbuild.build(buildOptions);
+  console.log('Build complete: dist/pre-signal.js');
+}
