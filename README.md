@@ -1,5 +1,7 @@
 # PreSignal
 
+[![GZip size](https://img.badgesize.io/levelinteractive/pre-signal/main/dist/pre-signal.js?compression=gzip)](https://github.com/levelinteractive/pre-signal/main/dist/pre-signal.js)
+
 A lightweight session engagement scoring utility that monkey-patches the `dataLayer` to score user interactions in real-time. Designed to feed normalized engagement signals back to advertising platforms for value-based bidding and audience quality optimization.
 
 ## How it works
