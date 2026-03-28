@@ -100,12 +100,12 @@ class PreSignal
 
   // -- Event resolution --
 
-  #resolveEvent(payload: any)
+  #resolveEvent(eventName: string, payload: any)
   {
-    if (! payload.event.startsWith('gtm.'))
-      return {event: payload.event, payload};
+    if (! eventName.startsWith('gtm.'))
+      return {event: eventName, context: { url: new URL(location.href) }};
 
-    let event = payload.event;
+    let event = eventName;
 
     const context = {
       url: new URL(location.href),
@@ -246,7 +246,7 @@ class PreSignal
     if (session.excluded)
       return payload;
 
-    const resolved = this.#resolveEvent(targetParams);
+    const resolved = this.#resolveEvent(eventName, targetParams);
 
     if (this.#exclusions.has(resolved.event)) {
       this.#excludeSession(session);
