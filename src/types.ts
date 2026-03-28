@@ -1,11 +1,3 @@
-export interface AevObject {
-  element: HTMLElement | null;
-  text: string | null;
-  url: URL | null;
-  class: string | null;
-  id: string | null;
-}
-
 export interface SessionData {
   score: number;
   positives: number;

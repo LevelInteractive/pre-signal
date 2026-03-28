@@ -1,5 +1,4 @@
 import type {
-  AevObject,
   EventConfig,
   EventScoreCallback,
   PreSignalConfig,
@@ -61,81 +60,191 @@ class PreSignal {
     const _this = this;
     const originalPush = this.#dataLayer.push;
 
-    this.#dataLayer.push = function () {
-      const args = arguments;
-
-      // If we're emitting a threshold event, pass through to avoid recursion
-      if (_this.#emitting)
-        return originalPush.apply(_this.#dataLayer, args as any);
-
-      // Handle GTM-style object literal pushes
-      if (_this.#isObjectLiteral(args[0])) {
-        let payload = args[0];
-
-        if (payload.event && _this.#events[payload.event])
-          payload = _this.#scoreEvent(payload);
-
-        return originalPush.call(_this.#dataLayer, payload);
+    this.#dataLayer.push = function (...args: any[]) {
+      if (_this.#emitting) {
+        return originalPush.apply(_this.#dataLayer, args);
       }
 
-      // Handle gtag()-style pushes (arguments object)
-      if (_this.#isArgumentsObject(args[0])) {
-        const command = args[0];
+      const payload = args[0];
 
-        if (command[0] === 'event' && command[1] && _this.#events[command[1]])
-          _this.#scoreGtagEvent(command);
-
-        return originalPush.apply(_this.#dataLayer, args as any);
+      // 1. Handle gtag()-style pushes (Arguments object)
+      if (_this.#isArgumentsObject(payload)) {
+        if (payload[0] === 'event' && payload[1]) {
+          args[0] = _this.#scoreEvent(payload, 'gtag');
+        }
+        return originalPush.apply(_this.#dataLayer, args);
       }
 
-      // Anything else, pass through untouched
-      return originalPush.apply(_this.#dataLayer, args as any);
+      // 2. Handle GTM-style object literal pushes
+      if (_this.#isObjectLiteral(payload)) {
+        if (payload.event) {
+          args[0] = _this.#scoreEvent(payload, 'gtm');
+        }
+        return originalPush.apply(_this.#dataLayer, args);
+      }
+
+      // 3. Pass through anything else untouched
+      return originalPush.apply(_this.#dataLayer, args);
     };
   }
 
-  #makeAevObject(payload: any): AevObject {
-    return {
-      element: payload['gtm.element'] || null,
-      text: payload['gtm.elementText'] ? payload['gtm.elementText'].toLowerCase() : null,
-      url: payload['gtm.elementUrl'] ? new URL(payload['gtm.elementUrl']) : null,
-      class: payload['gtm.elementClasses'] || null,
-      id: payload['gtm.elementId'] || null,
-    };
+  #pluckFromPayload(namespace: string, payload: any, keys: string[]): Record<string, any> {
+    const result: Record<string, any> = {};
+    
+    keys.forEach(key => {
+      const value = payload[`${namespace}${key}`];
+      result[key.toLowerCase()] = value !== undefined ? value : null;
+    });
+
+    return result;
   }
 
-  #scoreEvent(payload: any): any {
-    const eventName = payload.event;
-    const config = this.#events[eventName];
+  #resolveLinkClickEvent(context: any): string | null {
+    const link_click = 'link_click';
 
-    payload._aev = this.#makeAevObject(payload);
+    if (context.element.url?.protocol === 'mailto:')
+      return `email_${link_click}`;
 
-    const delta = config.score(payload, new URL(location.href));
+    if (context.element.url?.protocol === 'tel:')
+      return `phone_${link_click}`;
+
+    if (context.element.url && this.#isOutboundLink(context.element.url.hostname))
+      return `outbound_${link_click}`;
+
+    if (
+      context.element.node?.download ||
+      /\.(?:pdf|xlsx?|docx?|txt|rtf|csv|exe|key|pp(?:s|t|tx)|7z|pkg|rar|gz|zip|avi|mov|mp4|mpe?g|wmv|midi?|mp3|wav|wma)$/.test(context.element.url?.pathname || '')
+    ) return 'file_download';
+
+    // cta_click
+    // we need a way to define what a "CTA" looks like in the config. 
+    // for example, we could allow the user to specify patterns for text and class names that indicate a CTA.
+
+    return null;
+  }
+
+  #resolveEvent(payload: any) {
+
+    if (! payload.event.startsWith('gtm.'))
+      return {event: payload.event, payload};
+
+    let event = payload.event;
+
+    const context = {
+      url: new URL(location.href),
+      element: {
+        node: payload['gtm.element'] || null,
+      }
+    };
+
+    Object.assign(
+      context.element, 
+      this.#pluckFromPayload('gtm.element', payload, [
+        'Url',
+        'Text',
+        'Classes',
+      ])
+    );
+
+    switch (event) {
+
+      case 'gtm.load':
+      case 'gtm.historyChange-v2':
+        event = 'page_view';
+        break;
+
+      case 'gtm.linkClick':
+        event = this.#resolveLinkClickEvent(context) || 'gtm.linkClick';
+        break;
+
+      case 'gtm.video':
+
+        context.video = this.#pluckFromPayload('gtm.video', payload, [
+          'Title',
+          'Provider',
+          'Percent',
+          'Status',
+        ]);
+
+        event = `video_${context.video.status.toLowerCase()}`;
+
+        break;
+
+      case 'gtm.scrollDepth':
+
+        event = 'scroll';
+
+        context.scroll = this.#pluckFromPayload('gtm.scroll', payload, [
+          'Threshold',
+          'Units',
+          'Direction',
+        ]);
+
+        break;
+
+      case 'gtm.elementVisibility':
+        
+        event = 'element_impression';
+
+        context.impression = this.#pluckFromPayload('gtm.visible', payload, [
+          'Ratio',
+          'Time',
+          'FirstTime',
+          'LastTime',
+        ]);
+
+        break;
+
+    }
+
+    console.log('Resolving GTM event:', event, context);
+
+    return {event, context};
+
+  }
+
+  #scoreEvent(payload: any, format: 'gtm' | 'gtag'): any {
+    let eventName: string;
+    let targetParams: any;
+
+    if (format === 'gtag') {
+      eventName = payload[1];
+
+      // Safely ensure the parameters object exists at index 2
+      if (typeof payload[2] !== 'object' || payload[2] === null) {
+        payload[2] = {};
+
+        // CRITICAL: Fix the Arguments length quirk so GTM doesn't ignore the injected params
+        if (payload.length < 3) {
+          payload.length = 3;
+        }
+      }
+      targetParams = payload[2];
+    } else {
+      eventName = payload.event;
+      targetParams = payload;
+    }
+
+    const resolved = this.#resolveEvent(targetParams);
+    console.log('Resolved event:', resolved);
+
+    const config = this.#events[resolved.event];
+
+    if (!config)
+      return payload;
+
+    const delta = config.score(resolved.context);
 
     if (!Number.isInteger(delta)) {
       console.warn(`PreSignal: callback for "${eventName}" did not return an integer. Skipping.`);
-      return payload;
+      return payload; 
     }
 
     const session = this.#updateSession(delta);
 
-    // Augment the payload with scoring data
-    payload._preSignal = this.#buildPayload(delta, session);
+    targetParams._preSignal = this.#buildPayload(delta, session);
 
     return payload;
-  }
-
-  #scoreGtagEvent(command: any): void {
-    const eventName = command[1];
-    const params = command[2] || {};
-    const config = this.#events[eventName];
-    const delta = config.score(params);
-
-    if (!Number.isInteger(delta)) {
-      console.warn(`PreSignal: callback for "${eventName}" did not return an integer. Skipping.`);
-      return;
-    }
-
-    this.#updateSession(delta);
   }
 
   #updateSession(delta: number): SessionData {
@@ -243,11 +352,34 @@ class PreSignal {
   // -- Type checks --
 
   #isObjectLiteral(obj: any): boolean {
-    return obj !== null && typeof obj === 'object' && Object.getPrototypeOf(obj) === Object.prototype;
+    return (
+      obj !== null && 
+      typeof obj === 'object' && 
+      Object.getPrototypeOf(obj) === Object.prototype &&
+      Object.prototype.toString.call(obj) === '[object Object]' // This safely excludes '[object Arguments]'
+    );
   }
 
   #isArgumentsObject(obj: any): boolean {
     return Object.prototype.toString.call(obj) === '[object Arguments]';
+  }
+
+  #isOutboundLink(linkHostname: string): boolean {
+    try {
+      const currentHost = location.hostname;
+
+      if (linkHostname === currentHost) return false;
+
+      const rootDomain = (host: string) => {
+        const parts = host.split('.');
+        const depth = parts.at(-2)?.length <= 2 ? -3 : -2;
+        return parts.slice(depth).join('.');
+      };
+
+      return rootDomain(linkHostname) !== rootDomain(currentHost);
+    } catch {
+      return false;
+    }
   }
 }
 
