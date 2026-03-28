@@ -57,10 +57,11 @@ Replace the comment in the loader callback with your configuration:
 new PreSignal({
   maxScore: 120,
   thresholds: [
-    ['cold',    0],
-    ['warm',    25],
-    ['hot',     50],
-    ['on_fire', 75],
+    ['D', 20],
+    ['C', 40],
+    ['B', 60],
+    ['A', 80],
+    ['S', 100]
   ],
   ctaPatterns: {
     text: 'get started|sign up|request a demo',
@@ -105,12 +106,15 @@ The ceiling for the raw score. The percentile is calculated as `(score / maxScor
 
 An array of `[name, percentile]` tuples, where `percentile` is the minimum engagement percentile required to enter that tier. Thresholds are evaluated in ascending order.
 
+The following example configures a linear S-D style "tier list".
+
 ```javascript
 thresholds: [
-  ['cold',    0],   // 0–24%
-  ['warm',    25],  // 25–49%
-  ['hot',     50],  // 50–74%
-  ['on_fire', 75],  // 75–100%
+  ['D', 20],  // 20-39%
+  ['C', 40],  // 40-59%
+  ['B', 60],  // 60-79%
+  ['A', 80],  // 80-99%  
+  ['S', 100]  // 100%+
 ]
 ```
 
