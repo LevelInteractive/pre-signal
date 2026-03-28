@@ -4,6 +4,7 @@ export interface SessionData {
   negatives: number;
   total: number;
   threshold: string | null;
+  excluded: boolean;
 }
 
 export interface PreSignalPayload {
@@ -42,6 +43,7 @@ export interface PreSignalConfig {
   cookieName?: string;
   cta?: CtaConfig;
   events?: Record<string, EventConfig>;
+  exclusions?: string[];
   thresholds?: Threshold[];
   maxScore?: number;
 }

@@ -15,6 +15,7 @@ class PreSignal
   #cookieName!: string;
   #ctaPatterns!: { text: RegExp | null; classes: RegExp | null };
   #events!: Record<string, EventConfig>;
+  #exclusions!: Set<string>;
   #thresholds!: Threshold[];
   #maxScore!: number;
   #dataLayer!: any[];
@@ -30,13 +31,14 @@ class PreSignal
     this.#cookieName = config.cookieName || '_preSignal';
     this.#ctaPatterns = this.#compileCtaPatterns(config.cta);
     this.#events = config.events || {};
+    this.#exclusions = new Set(config.exclusions || []);
     this.#thresholds = this.#sortThresholds(config.thresholds || []);
     this.#maxScore = config.maxScore || 100;
     this.#dataLayer = (window as any).dataLayer = (window as any).dataLayer || [];
     this.#emitting = false;
 
     if (!this.#getSession())
-      this.#setSession({ score: 0, positives: 0, negatives: 0, total: 0, threshold: null });
+      this.#setSession({ score: 0, positives: 0, negatives: 0, total: 0, threshold: null, excluded: false });
 
     this.#monkeyPatchPush();
   }
@@ -50,7 +52,7 @@ class PreSignal
 
   reset(): void
   {
-    this.#setSession({ score: 0, positives: 0, negatives: 0, total: 0, threshold: null });
+    this.#setSession({ score: 0, positives: 0, negatives: 0, total: 0, threshold: null, excluded: false });
   }
 
   registerEvent(eventName: string, score: EventScoreCallback | number): void
@@ -239,12 +241,20 @@ class PreSignal
       targetParams = payload;
     }
 
+    const session = this.#getSession()!;
+
+    if (session.excluded)
+      return payload;
+
     const resolved = this.#resolveEvent(targetParams);
-    console.log('Resolved event:', resolved);
+
+    if (this.#exclusions.has(resolved.event)) {
+      this.#excludeSession(session);
+      targetParams._preSignal = this.#buildPayload(0, session);
+      return payload;
+    }
 
     const config = this.#events[resolved.event];
-
-    console.log('Event config:', config);
 
     if (!config)
       return payload;
@@ -258,9 +268,9 @@ class PreSignal
       return payload;
     }
 
-    const session = this.#updateSession(delta);
+    const updatedSession = this.#updateSession(delta);
 
-    targetParams._preSignal = this.#buildPayload(delta, session);
+    targetParams._preSignal = this.#buildPayload(delta, updatedSession);
 
     return payload;
   }
@@ -328,6 +338,21 @@ class PreSignal
     }
 
     return matched;
+  }
+
+  #excludeSession(session: SessionData): void
+  {
+    session.excluded = true;
+    this.#setSession(session);
+
+    this.#emitting = true;
+
+    this.#dataLayer.push({
+      event: 'preSignal.exclude',
+      _preSignal: this.#buildPayload(0, session),
+    });
+
+    this.#emitting = false;
   }
 
   #emitThreshold(delta: number, session: SessionData, previousThreshold: string | null): void
