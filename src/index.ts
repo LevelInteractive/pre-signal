@@ -23,7 +23,6 @@ class PreSignal
   constructor(config: PreSignalConfig = {})
   {
     if (PreSignal.#instance) {
-      console.warn('PreSignal: instance already exists. Returning existing instance.');
       return PreSignal.#instance;
     }
 
@@ -62,7 +61,7 @@ class PreSignal
     this.#events[eventName] = { score };
   }
 
-  // -- Core --
+  // -- DataLayer interception --
 
   #monkeyPatchPush(): void
   {
@@ -97,41 +96,7 @@ class PreSignal
     };
   }
 
-  #pluckFromPayload(namespace: string, payload: any, keys: string[]): Record<string, any>
-  {
-    const result: Record<string, any> = {};
-    
-    keys.forEach(key => {
-      const value = payload[`${namespace}${key}`];
-      result[key.toLowerCase()] = value !== undefined ? value : null;
-    });
-
-    return result;
-  }
-
-  #resolveLinkClickEvent(context: any): string | null
-  {
-    const link_click = 'link_click';
-
-    if (context.element.url?.protocol === 'mailto:')
-      return `email_${link_click}`;
-
-    if (context.element.url?.protocol === 'tel:')
-      return `phone_${link_click}`;
-
-    if (context.element.url && this.#isOutboundLink(context.element.url.hostname))
-      return `outbound_${link_click}`;
-
-    if (
-      context.element.node?.download ||
-      /\.(?:pdf|xlsx?|docx?|txt|rtf|csv|exe|key|pp(?:s|t|tx)|7z|pkg|rar|gz|zip|avi|mov|mp4|mpe?g|wmv|midi?|mp3|wav|wma)$/.test(context.element.url?.pathname || '')
-    ) return 'file_download';
-
-    if (this.#isCtaClick(context))
-      return 'cta_click';
-
-    return null;
-  }
+  // -- Event resolution --
 
   #resolveEvent(payload: any)
   {
@@ -148,7 +113,7 @@ class PreSignal
     };
 
     Object.assign(
-      context.element, 
+      context.element,
       this.#pluckFromPayload('gtm.element', payload, [
         'Url',
         'Text',
@@ -196,7 +161,7 @@ class PreSignal
         break;
 
       case 'gtm.elementVisibility':
-        
+
         event = 'element_impression';
 
         context.impression = this.#pluckFromPayload('gtm.visible', payload, [
@@ -212,6 +177,44 @@ class PreSignal
 
     return {event, context};
   }
+
+  #resolveLinkClickEvent(context: any): string | null
+  {
+    const link_click = 'link_click';
+
+    if (context.element.url?.protocol === 'mailto:')
+      return `email_${link_click}`;
+
+    if (context.element.url?.protocol === 'tel:')
+      return `phone_${link_click}`;
+
+    if (context.element.url && this.#isOutboundLink(context.element.url.hostname))
+      return `outbound_${link_click}`;
+
+    if (
+      context.element.node?.download ||
+      /\.(?:pdf|xlsx?|docx?|txt|rtf|csv|exe|key|pp(?:s|t|tx)|7z|pkg|rar|gz|zip|avi|mov|mp4|mpe?g|wmv|midi?|mp3|wav|wma)$/.test(context.element.url?.pathname || '')
+    ) return 'file_download';
+
+    if (this.#isCtaClick(context))
+      return 'cta_click';
+
+    return null;
+  }
+
+  #pluckFromPayload(namespace: string, payload: any, keys: string[]): Record<string, any>
+  {
+    const result: Record<string, any> = {};
+
+    keys.forEach(key => {
+      const value = payload[`${namespace}${key}`];
+      result[key.toLowerCase()] = value !== undefined ? value : null;
+    });
+
+    return result;
+  }
+
+  // -- Scoring --
 
   #scoreEvent(payload: any, format: 'gtm' | 'gtag'): any
   {
@@ -283,7 +286,20 @@ class PreSignal
     return session;
   }
 
-  // -- Scoring helpers --
+  #buildPayload(delta: number, session: SessionData): PreSignalPayload
+  {
+    return {
+      delta,
+      score: session.score,
+      percentile: this.#toPercentile(session.score),
+      threshold: session.threshold,
+      events: {
+        positives: session.positives,
+        negatives: session.negatives,
+        total: session.total,
+      }
+    };
+  }
 
   #clamp(score: number): number
   {
@@ -332,22 +348,7 @@ class PreSignal
     this.#emitting = false;
   }
 
-  #buildPayload(delta: number, session: SessionData): PreSignalPayload
-  {
-    return {
-      delta,
-      score: session.score,
-      percentile: this.#toPercentile(session.score),
-      threshold: session.threshold,
-      events: {
-        positives: session.positives,
-        negatives: session.negatives,
-        total: session.total,
-      }
-    };
-  }
-
-  // -- Cookie helpers --
+  // -- Session persistence --
 
   #getSession(): SessionData | null
   {
@@ -374,13 +375,13 @@ class PreSignal
     return match ? match[1] : null;
   }
 
-  // -- Type checks --
+  // -- Guards & detection --
 
   #isObjectLiteral(obj: any): boolean
   {
     return (
-      obj !== null && 
-      typeof obj === 'object' && 
+      obj !== null &&
+      typeof obj === 'object' &&
       Object.getPrototypeOf(obj) === Object.prototype &&
       Object.prototype.toString.call(obj) === '[object Object]' // This safely excludes '[object Arguments]'
     );
