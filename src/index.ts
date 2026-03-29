@@ -295,14 +295,14 @@ class PreSignal
       return payload;
     }
 
-    const updatedSession = this.#updateSession(delta);
+    const updatedSession = this.#updateSession(resolved.event, delta);
 
     targetParams.preSignal = { event: resolved.event, ...this.#buildPayload(delta, updatedSession) };
 
     return payload;
   }
 
-  #updateSession(delta: number): SessionData
+  #updateSession(event: string, delta: number): SessionData
   {
     const session = this.#getSession()!;
     const previousThreshold = session.threshold;
@@ -317,8 +317,10 @@ class PreSignal
 
     this.#setSession(session);
 
+    this.#emit('score.update', { event, ...this.#buildPayload(delta, session) });
+
     if (session.threshold !== previousThreshold)
-      this.#emitThreshold(delta, session, previousThreshold);
+      this.#emitThreshold(event, delta, session, previousThreshold);
 
     return session;
   }
@@ -382,7 +384,7 @@ class PreSignal
     this.#emitting = false;
   }
 
-  #emitThreshold(delta: number, session: SessionData, previousThreshold: string | null): void
+  #emitThreshold(event: string, delta: number, session: SessionData, previousThreshold: string | null): void
   {
     this.#emitting = true;
 
@@ -397,7 +399,23 @@ class PreSignal
       }
     });
 
+    this.#emit('threshold.update', {
+      event,
+      ...this.#buildPayload(delta, session),
+      threshold: {
+        name: session.threshold,
+        previous: previousThreshold,
+      }
+    });
+
     this.#emitting = false;
+  }
+
+  // -- CustomEvent emission --
+
+  #emit(name: string, detail: any): void
+  {
+    window.dispatchEvent(new CustomEvent(`pre-signal:${name}`, { detail }));
   }
 
   // -- Session persistence --
