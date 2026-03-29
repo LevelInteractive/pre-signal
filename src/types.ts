@@ -11,6 +11,7 @@ export interface SessionData {
 }
 
 export interface PreSignalPayload {
+  event?: string;
   delta: number;
   score: number;
   percentile: number;

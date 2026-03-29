@@ -256,7 +256,7 @@ class PreSignal
 
     if (this.#exclusions.has(resolved.event)) {
       this.#excludeSession(session);
-      targetParams.preSignal = this.#buildPayload(0, session);
+      targetParams.preSignal = { event: resolved.event, ...this.#buildPayload(0, session) };
       return payload;
     }
 
@@ -276,7 +276,7 @@ class PreSignal
 
     const updatedSession = this.#updateSession(delta);
 
-    targetParams.preSignal = this.#buildPayload(delta, updatedSession);
+    targetParams.preSignal = { event: resolved.event, ...this.#buildPayload(delta, updatedSession) };
 
     return payload;
   }
