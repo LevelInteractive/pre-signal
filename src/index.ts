@@ -340,7 +340,7 @@ class PreSignal
 
   #clamp(score: number): number
   {
-    return Math.min(Math.max(score, 0), this.#maxScore);
+    return Math.round(Math.min(Math.max(score, 0), this.#maxScore) * 100) / 100;
   }
 
   #toPercentile(score: number): number
