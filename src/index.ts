@@ -63,8 +63,8 @@ class PreSignal
 
   registerEvent(eventName: string, score: EventScoreCallback | number): void
   {
-    if (typeof score !== 'function' && !Number.isInteger(score))
-      throw new Error(`PreSignal: score for "${eventName}" must be a function or an integer.`);
+    if (typeof score !== 'function' && !Number.isFinite(score))
+      throw new Error(`PreSignal: score for "${eventName}" must be a function or a number.`);
 
     this.#events[eventName] = { score };
   }
@@ -194,6 +194,8 @@ class PreSignal
   {
     const link_click = 'link_click';
 
+    console.log('Resolving link click event with context:', context);
+
     if (context.element.url?.protocol === 'mailto:')
       return `email_${link_click}`;
 
@@ -217,7 +219,23 @@ class PreSignal
 
     keys.forEach(key => {
       const value = payload[`${namespace}${key}`];
-      result[key.toLowerCase()] = value !== undefined ? value : null;
+      const normalizedKey = key.toLowerCase();
+
+      if (value === undefined) {
+        result[normalizedKey] = null;
+        return;
+      }
+
+      if (normalizedKey === 'url' && typeof value === 'string') {
+        try {
+          result[normalizedKey] = new URL(value);
+        } catch {
+          result[normalizedKey] = null;
+        }
+        return;
+      }
+
+      result[normalizedKey] = value;
     });
 
     return result;
@@ -255,6 +273,8 @@ class PreSignal
 
     const resolved = this.#resolveEvent(eventName, targetParams);
 
+    console.log('Resolved event:', resolved);
+
     if (this.#exclusions.has(resolved.event)) {
       this.#excludeSession(session);
       targetParams.preSignal = { event: resolved.event, ...this.#buildPayload(0, session) };
@@ -270,8 +290,8 @@ class PreSignal
       ? config.score(resolved.context)
       : config.score;
 
-    if (!Number.isInteger(delta)) {
-      console.warn(`PreSignal: score for "${eventName}" must resolve to an integer. Skipping.`);
+    if (!Number.isFinite(delta)) {
+      console.warn(`PreSignal: score for "${eventName}" must resolve to a number. Skipping.`);
       return payload;
     }
 
