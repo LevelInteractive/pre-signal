@@ -38,17 +38,18 @@ export interface EventConfig {
   score: EventScoreCallback | number;
 }
 
-export interface CtaConfig {
-  text?: string;
-  classes?: string;
+export interface ResolverCriteria {
+  selector?: string;
+  text?: string | RegExp;
+  classes?: string | RegExp;
   match?: 'any' | 'all';
 }
 
 export interface PreSignalConfig {
   cookieName?: string;
-  ctaPatterns?: CtaConfig;
   events?: Record<string, EventConfig>;
   exclusions?: string[];
+  resolvers?: Record<string, Record<string, ResolverCriteria>>;
   thresholds?: Threshold[];
   maxScore?: number;
 }

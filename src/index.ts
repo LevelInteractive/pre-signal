@@ -1,9 +1,9 @@
 import type {
-  CtaConfig,
   EventConfig,
   EventScoreCallback,
   PreSignalConfig,
   PreSignalPayload,
+  ResolverCriteria,
   SessionData,
   Threshold,
 } from './types';
@@ -14,7 +14,7 @@ class PreSignal
   static #version = __VERSION__;
 
   #cookieName!: string;
-  #ctaPatterns!: { text: RegExp | null; classes: RegExp | null; match: 'any' | 'all' };
+  #resolvers!: Record<string, Record<string, ResolverCriteria>>;
   #events!: Record<string, EventConfig>;
   #exclusions!: Set<string>;
   #thresholds!: Threshold[];
@@ -30,7 +30,7 @@ class PreSignal
 
     PreSignal.#instance = this;
     this.#cookieName = config.cookieName || '_preSignal';
-    this.#ctaPatterns = this.#compileCtaPatterns(config.ctaPatterns);
+    this.#resolvers = config.resolvers || {};
     this.#events = config.events || {};
     this.#exclusions = new Set(config.exclusions || []);
     this.#thresholds = this.#sortThresholds(config.thresholds || []);
@@ -183,6 +183,10 @@ class PreSignal
 
     }
 
+    if (event === eventName) {
+      event = this.#runCustomResolvers(eventName, context) || event;
+    }
+
     return {event, context};
   }
 
@@ -203,9 +207,6 @@ class PreSignal
       context.element.node?.download ||
       /\.(?:pdf|xlsx?|docx?|txt|rtf|csv|exe|key|pp(?:s|t|tx)|7z|pkg|rar|gz|zip|avi|mov|mp4|mpe?g|wmv|midi?|mp3|wav|wma)$/.test(context.element.url?.pathname || '')
     ) return 'file_download';
-
-    if (this.#isCtaClick(context))
-      return 'cta_click';
 
     return null;
   }
@@ -430,24 +431,42 @@ class PreSignal
     return Object.prototype.toString.call(obj) === '[object Arguments]';
   }
 
-  #compileCtaPatterns(cta?: CtaConfig): { text: RegExp | null; classes: RegExp | null; match: 'any' | 'all' }
+  #runCustomResolvers(eventName: string, context: any): string | null
   {
-    return {
-      text: cta?.text ? new RegExp(cta.text, 'i') : null,
-      classes: cta?.classes ? new RegExp(cta.classes, 'i') : null,
-      match: cta?.match || 'any',
-    };
-  }
+    const resolvers = this.#resolvers[eventName];
 
-  #isCtaClick(context: any): boolean
-  {
-    const textMatch = this.#ctaPatterns.text?.test(context.element.text || '') ?? false;
-    const classMatch = this.#ctaPatterns.classes?.test(context.element.classes || '') ?? false;
+    if (!resolvers)
+      return null;
 
-    if (this.#ctaPatterns.match === 'all')
-      return textMatch && classMatch;
+    for (const [resolvedName, criteria] of Object.entries(resolvers)) {
+      const results: boolean[] = [];
 
-    return textMatch || classMatch;
+      if (criteria.selector !== undefined)
+        results.push(!!context.element.node?.closest(criteria.selector));
+
+      if (criteria.text !== undefined) {
+        const pattern = criteria.text instanceof RegExp ? criteria.text : new RegExp(criteria.text, 'i');
+        results.push(pattern.test(context.element.text || ''));
+      }
+
+      if (criteria.classes !== undefined) {
+        const pattern = criteria.classes instanceof RegExp ? criteria.classes : new RegExp(criteria.classes, 'i');
+        results.push(pattern.test(context.element.classes || ''));
+      }
+
+      if (results.length === 0)
+        continue;
+
+      const match = criteria.match || 'any';
+      const passed = match === 'all'
+        ? results.every(Boolean)
+        : results.some(Boolean);
+
+      if (passed)
+        return resolvedName;
+    }
+
+    return null;
   }
 
   #isOutboundLink(linkHostname: string): boolean
@@ -476,11 +495,11 @@ class PreSignal
 // ESM export
 export default PreSignal;
 export type {
-  CtaConfig,
   EventConfig,
   EventScoreCallback,
   PreSignalConfig,
   PreSignalPayload,
+  ResolverCriteria,
   SessionData,
   Threshold,
   ThresholdPayload,
