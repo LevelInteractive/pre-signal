@@ -77,30 +77,31 @@ class PreSignal
     const originalPush = this.#dataLayer.push;
 
     this.#dataLayer.push = function (...args: any[]) {
-      if (_this.#emitting) {
-        return originalPush.apply(_this.#dataLayer, args);
-      }
+      try {
+        if (_this.#emitting)
+          return originalPush.apply(_this.#dataLayer, args);
 
-      const payload = args[0];
+        const payload = args[0];
 
-      // 1. Handle gtag()-style pushes (Arguments object)
-      if (_this.#isArgumentsObject(payload)) {
-        if (payload[0] === 'event' && payload[1]) {
-          args[0] = _this.#scoreEvent(payload, 'gtag');
+        if (_this.#isArgumentsObject(payload)) {
+          if (payload[0] === 'event' && payload[1])
+            args[0] = _this.#scoreEvent(payload, 'gtag');
+
+          return originalPush.apply(_this.#dataLayer, args);
         }
-        return originalPush.apply(_this.#dataLayer, args);
-      }
 
-      // 2. Handle GTM-style object literal pushes
-      if (_this.#isObjectLiteral(payload)) {
-        if (payload.event) {
-          args[0] = _this.#scoreEvent(payload, 'gtm');
+        if (_this.#isObjectLiteral(payload)) {
+          if (payload.event)
+            args[0] = _this.#scoreEvent(payload, 'gtm');
+
+          return originalPush.apply(_this.#dataLayer, args);
         }
+
+        return originalPush.apply(_this.#dataLayer, args);
+      } catch (e) {
+        console.warn('PreSignal: error during event processing.', e);
         return originalPush.apply(_this.#dataLayer, args);
       }
-
-      // 3. Pass through anything else untouched
-      return originalPush.apply(_this.#dataLayer, args);
     };
   }
 
