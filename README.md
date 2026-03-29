@@ -179,12 +179,12 @@ The exclusion is permanent for the session. Calling `instance.reset()` will clea
 
 An object where each key is an event name (see [Auto-Event Resolution](#auto-event-resolution)) and the value is an object with a `score` property. The `score` can be either:
 
-- **An integer** — a static score applied every time the event fires.
-- **A callback function** — receives a `context` object and must return an integer (positive or negative).
+- **A number** — a static score applied every time the event fires (e.g. `1`, `2.5`, `-3`).
+- **A callback function** — receives a `context` object and must return a number (positive or negative).
 
 ```javascript
 events: {
-  // Static integer score
+  // Static score
   page_view: { score: 1 },
   cta_click: { score: 10 },
 
@@ -197,7 +197,7 @@ events: {
 }
 ```
 
-Returning a non-integer from a callback will log a warning and skip scoring for that event.
+Returning a non-numeric value from a callback will log a warning and skip scoring for that event.
 
 ### `cookieName`
 
@@ -362,7 +362,7 @@ Resets the session cookie to zero.
 
 ### `instance.registerEvent(eventName, score)`
 
-Register an event after initialization. The `score` argument can be a function or an integer.
+Register an event after initialization. The `score` argument can be a function or a number.
 
 ```javascript
 ps.registerEvent('video_complete', 5);
