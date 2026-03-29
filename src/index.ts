@@ -480,9 +480,12 @@ class PreSignal
 
     for (const [resolvedName, criteria] of Object.entries(resolvers)) {
       const results: boolean[] = [];
+      let resolvedNode: Element | null | undefined = null;
 
-      if (criteria.selector !== undefined)
-        results.push(!!context.element.node?.closest(criteria.selector));
+      if (criteria.selector !== undefined) {
+        resolvedNode = context.element.node?.closest(criteria.selector);
+        results.push(!!resolvedNode);
+      }
 
       if (criteria.text !== undefined) {
         const pattern = criteria.text instanceof RegExp ? criteria.text : new RegExp(criteria.text, 'i');
@@ -502,8 +505,25 @@ class PreSignal
         ? results.every(Boolean)
         : results.some(Boolean);
 
-      if (passed)
+      if (passed) {
+        if (resolvedNode) {
+          context.element.node = resolvedNode;
+          context.element.text = resolvedNode.textContent?.trim().toLowerCase() || null;
+          context.element.classes = resolvedNode.className || null;
+
+          let url: URL | null = null;
+          if (resolvedNode.tagName === 'A' && (resolvedNode as HTMLAnchorElement).href) {
+            try {
+              url = new URL((resolvedNode as HTMLAnchorElement).href);
+            } catch {
+              url = null;
+            }
+          }
+          context.element.url = url;
+        }
+
         return resolvedName;
+      }
     }
 
     return null;
