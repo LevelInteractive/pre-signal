@@ -345,6 +345,46 @@ Emitted when a session is excluded due to a matching event in the `exclusions` c
 }
 ```
 
+## Window CustomEvents
+
+In addition to the dataLayer events above, PreSignal dispatches native `CustomEvent`s on the `window` object. These are useful for integrating with non-GTM code — vanilla JS, frameworks, or other scripts that need to react to scoring changes without polling the dataLayer.
+
+You can listen for them with `window.addEventListener`:
+
+```javascript
+window.addEventListener('pre-signal:score.update', function(e) {
+  console.log(e.detail);
+});
+```
+
+### `pre-signal:score.update`
+
+Fired after every scored event. The `detail` object contains:
+
+| Property | Type | Description |
+|---|---|---|
+| `event` | `string` | The resolved event name that was scored |
+| `delta` | `number` | The score change from this event |
+| `score` | `number` | The new cumulative score |
+| `percentile` | `number` | The new engagement percentile (0–100) |
+| `threshold` | `string` | The current threshold name |
+| `events.positives` | `number` | Count of positive-scoring events |
+| `events.negatives` | `number` | Count of negative-scoring events |
+| `events.total` | `number` | Total scored events |
+
+### `pre-signal:threshold.update`
+
+Fired when a threshold boundary is crossed (in either direction). The `detail` object contains the same properties as `pre-signal:score.update`, except `threshold` is an object:
+
+| Property | Type | Description |
+|---|---|---|
+| `threshold.name` | `string` | The new threshold name |
+| `threshold.previous` | `string` | The previous threshold name |
+
+### `pre-signal:exclude`
+
+Fired when a session is excluded due to a matching event in the `exclusions` config. The `detail` object contains the same properties as `pre-signal:score.update`, with `delta` always set to `0`.
+
 ## Public API
 
 ### `instance.score`
