@@ -194,8 +194,6 @@ class PreSignal
   {
     const link_click = 'link_click';
 
-    console.log('Resolving link click event with context:', context);
-
     if (context.element.url?.protocol === 'mailto:')
       return `email_${link_click}`;
 
@@ -272,8 +270,6 @@ class PreSignal
       return payload;
 
     const resolved = this.#resolveEvent(eventName, targetParams);
-
-    console.log('Resolved event:', resolved);
 
     if (this.#exclusions.has(resolved.event)) {
       this.#excludeSession(resolved.event, session);
