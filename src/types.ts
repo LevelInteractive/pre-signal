@@ -1,5 +1,3 @@
-declare const __VERSION__: string;
-
 export interface SessionData {
   score: number;
   positives: number;

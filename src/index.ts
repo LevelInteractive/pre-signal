@@ -58,7 +58,7 @@ class PreSignal
 
   reset(): void
   {
-    this.#setSession({ score: 0, positives: 0, negatives: 0, total: 0, threshold: null, excluded: false });
+    this.#setSession({ score: 0, positives: 0, negatives: 0, total: 0, threshold: null, excluded: false, v: PreSignal.#version });
   }
 
   registerEvent(eventName: string, score: EventScoreCallback | number): void
@@ -113,7 +113,7 @@ class PreSignal
 
     let event = eventName;
 
-    const context = {
+    const context: Record<string, any> = {
       url: new URL(location.href),
       element: {
         node: payload['gtm.element'] || null,
@@ -478,7 +478,7 @@ class PreSignal
 
       const rootDomain = (host: string) => {
         const parts = host.split('.');
-        const depth = parts.at(-2)?.length <= 2 ? -3 : -2;
+        const depth = (parts.at(-2)?.length ?? 0) <= 2 ? -3 : -2;
         return parts.slice(depth).join('.');
       };
 
