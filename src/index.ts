@@ -276,7 +276,7 @@ class PreSignal
     console.log('Resolved event:', resolved);
 
     if (this.#exclusions.has(resolved.event)) {
-      this.#excludeSession(session);
+      this.#excludeSession(resolved.event, session);
       targetParams.preSignal = { event: resolved.event, ...this.#buildPayload(0, session) };
       return payload;
     }
@@ -369,7 +369,7 @@ class PreSignal
     return matched;
   }
 
-  #excludeSession(session: SessionData): void
+  #excludeSession(event: string, session: SessionData): void
   {
     session.excluded = true;
     this.#setSession(session);
@@ -380,6 +380,8 @@ class PreSignal
       event: 'preSignal.exclude',
       preSignal: this.#buildPayload(0, session),
     });
+
+    this.#emit('exclude', { event, ...this.#buildPayload(0, session) });
 
     this.#emitting = false;
   }
