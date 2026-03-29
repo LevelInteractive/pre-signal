@@ -8,18 +8,18 @@ A lightweight session engagement scoring utility that monkey-patches the `dataLa
 
 PreSignal intercepts the global `dataLayer.push()` method and scores each event against a configurable set of rules. Every scored event updates a session cookie with a running total, and each `dataLayer.push()` payload is augmented with the current score, percentile, and threshold.
 
-When a user's engagement crosses a threshold boundary (e.g. `cold` → `warm`), PreSignal emits a `preSignal.threshold` event to the dataLayer — which can be used as a GTM trigger to fire conversion tags, audience signals, or any other downstream action.
+When a user's engagement crosses a threshold boundary (e.g. `D` → `C`), PreSignal emits a `preSignal.threshold` event to the dataLayer — which can be used as a GTM trigger to fire conversion tags, audience signals, or any other downstream action.
 
 ### Supported event formats
 
 PreSignal handles both common `dataLayer` push formats:
 
 - **GTM-style object literals** — `dataLayer.push({ event: 'form_submit', ... })` — the payload is augmented with a `preSignal` object before reaching GTM.
-- **gtag()-style arguments** — `gtag('event', 'purchase', { ... })` — the session is scored but the arguments object is passed through unmodified.
+- **gtag()-style arguments** — `gtag('event', 'purchase', { ... })` — the session is scored and the parameters object is augmented with a `preSignal` property.
 
 ### Session cookie
 
-Session state is stored in a JSON cookie (default: `preSignal`) with no `max-age` or `expires`, so it expires when the browser session ends. The cookie tracks:
+Session state is stored in a JSON cookie (default: `_preSignal`) with no `max-age` or `expires`, so it expires when the browser session ends. The cookie tracks:
 
 | Key | Description |
 |---|---|
@@ -27,7 +27,7 @@ Session state is stored in a JSON cookie (default: `preSignal`) with no `max-age
 | `positives` | Count of events that returned a positive delta |
 | `negatives` | Count of events that returned a negative delta |
 | `total` | Total number of scored events |
-| `threshold` | Name of the current threshold (e.g. `'warm'`) |
+| `threshold` | Name of the current threshold (e.g. `'C'`), or `null` if no threshold has been reached |
 | `excluded` | Whether the session has been excluded from scoring |
 
 ## How to use
@@ -39,12 +39,14 @@ Create a Custom HTML tag in GTM and set it to fire on **All Pages** (or your pre
 ```html
 <script>
 (function(s,i,g,n,a,l){
-  a=i.createElement(g);a.onload=n;a.defer=1;
-  a.src="https://cdn.jsdelivr.net/gh/levelinteractive/pre-signal@"+s+"/dist/pre-signal.js";
-  l=i.getElementsByTagName(g)[0];l.parentNode.insertBefore(a,l);
-})(document, 'script', "latest", function() {
+  a=s.createElement(i);a.onload=n;a.defer=1;
+  a.src="https://cdn.jsdelivr.net/gh/levelinteractive/pre-signal@"+g+"/dist/pre-signal.js";
+  l=s.getElementsByTagName(i)[0];l.parentNode.insertBefore(a,l);
+})(document, 'script', 'latest', function() {
+
   // We'll initialize our PreSignal instance here in step #2
   // new PreSignal(...);
+
 });
 </script>
 ```
@@ -128,11 +130,13 @@ Optional. Defines site-specific rules for resolving raw GTM event names into cus
 
 Custom resolvers run **after** the built-in auto-resolution logic. If a GTM event is already resolved by the auto-resolver (e.g. `gtm.linkClick` → `email_link_click`), custom resolvers are skipped. They only run when the event name is still the raw GTM name. First match wins — resolvers are evaluated in definition order.
 
+When a resolver matches using a `selector` criteria, the `context.element` properties are updated to reflect the resolved node (the element matched by `closest()`) rather than the original clicked element. This is particularly useful for `gtm.click` events where GTM's event delegation gives you the leaf node (e.g. a `<span>`) instead of the meaningful interactive ancestor (e.g. the accordion header).
+
 #### Criteria properties
 
 | Property | Type | Description |
 |---|---|---|
-| `selector` | `string` | Runs `element.closest(selector)` on the GTM element. Truthy = pass. |
+| `selector` | `string` | Runs `element.closest(selector)` on the GTM element. Truthy = pass. When matched, `context.element` is updated to the resolved node. |
 | `text` | `string \| RegExp` | Tests against the element's text content (lowercased). Strings are compiled to case-insensitive regex. |
 | `classes` | `string \| RegExp` | Tests against the element's class attribute. Strings are compiled to case-insensitive regex. |
 | `match` | `'any' \| 'all'` | Defaults to `'any'`. Whether ANY or ALL provided criteria must pass. |
@@ -201,7 +205,7 @@ Returning a non-numeric value from a callback will log a warning and skip scorin
 
 ### `cookieName`
 
-Optional. Defaults to `'preSignal'`. The name of the session cookie used to persist the score.
+Optional. Defaults to `'_preSignal'`. The name of the session cookie used to persist the score.
 
 ## Auto-Event Resolution
 
@@ -220,7 +224,7 @@ During resolution, relevant auto-event variables are extracted from the dataLaye
 | `gtm.scrollDepth` | `scroll` | `context.url`, `context.scroll` |
 | `gtm.elementVisibility` | `element_impression` | `context.url`, `context.impression` |
 
-Non-GTM events (e.g. custom `dataLayer.push({ event: 'form_submit' })`) pass through with their original name. If a `gtm.*` event doesn't resolve to a named event via the built-in auto-resolver, custom [resolvers](#resolvers) are evaluated next. If no custom resolver matches either, the raw `gtm.*` event name is used to look up the scoring config — so you can still register a handler for `'gtm.linkClick'` as a catch-all for link clicks that don't match any classification.
+Non-GTM events (e.g. custom `dataLayer.push({ event: 'form_submit' })`) pass through with their original name and receive a `context` object with `context.url` available. If a `gtm.*` event doesn't resolve to a named event via the built-in auto-resolver, custom [resolvers](#resolvers) are evaluated next. If no custom resolver matches either, the raw `gtm.*` event name is used to look up the scoring config — so you can still register a handler for `'gtm.linkClick'` as a catch-all for link clicks that don't match any classification.
 
 ### Link click resolution
 
@@ -237,17 +241,15 @@ If none of the above match, the event remains as `gtm.linkClick`. At that point,
 
 ### Context object
 
-All `score` callbacks receive a `context` object. The properties available depend on the event type:
+All `score` callbacks receive a `context` object. The `context.url` property (a `URL` object of the current page) is always available, regardless of event type. Additional properties depend on the event:
 
-**`context.url`** — always present. A `URL` object of the current page.
-
-**`context.element`** — present for link click events.
+**`context.element`** — present for any `gtm.*` event that includes element data (e.g. `gtm.linkClick`, `gtm.click`).
 
 | Property | Description |
 |---|---|
-| `context.element.node` | The DOM element that was clicked |
-| `context.element.url` | Parsed `URL` object of the link href |
-| `context.element.text` | The link's text content (lowercased) |
+| `context.element.node` | The DOM element (or the resolved node if a `selector`-based custom resolver matched) |
+| `context.element.url` | Parsed `URL` object of the element's href, or `null` |
+| `context.element.text` | The element's text content (lowercased) |
 | `context.element.classes` | The element's class attribute |
 
 **`context.video`** — present for video events.
@@ -287,10 +289,11 @@ Every scored GTM-style event gets a `preSignal` object appended:
   event: 'form_submit',
   // ... original payload ...
   preSignal: {
+    event: 'form_submit',
     delta: 10,
     score: 45,
     percentile: 38,
-    threshold: 'warm',
+    threshold: 'C',
     events: {
       positives: 4,
       negatives: 1,
@@ -317,8 +320,8 @@ Emitted whenever the session crosses a threshold boundary (in either direction):
       total: 7
     },
     threshold: {
-      name: 'hot',
-      previous: 'warm'
+      name: 'B',
+      previous: 'C'
     }
   }
 }
@@ -335,7 +338,7 @@ Emitted when a session is excluded due to a matching event in the `exclusions` c
     delta: 0,
     score: 30,
     percentile: 25,
-    threshold: 'warm',
+    threshold: 'D',
     events: {
       positives: 3,
       negatives: 0,
@@ -367,7 +370,7 @@ Fired after every scored event. The `detail` object contains:
 | `delta` | `number` | The score change from this event |
 | `score` | `number` | The new cumulative score |
 | `percentile` | `number` | The new engagement percentile (0–100) |
-| `threshold` | `string` | The current threshold name |
+| `threshold` | `string \| null` | The current threshold name, or `null` if no threshold reached |
 | `events.positives` | `number` | Count of positive-scoring events |
 | `events.negatives` | `number` | Count of negative-scoring events |
 | `events.total` | `number` | Total scored events |
@@ -379,7 +382,7 @@ Fired when a threshold boundary is crossed (in either direction). The `detail` o
 | Property | Type | Description |
 |---|---|---|
 | `threshold.name` | `string` | The new threshold name |
-| `threshold.previous` | `string` | The previous threshold name |
+| `threshold.previous` | `string \| null` | The previous threshold name |
 
 ### `pre-signal:exclude`
 
@@ -392,8 +395,8 @@ Fired when a session is excluded due to a matching event in the `exclusions` con
 Getter that returns the current session object from the cookie.
 
 ```javascript
-let session = ps.score;
-// { score: 45, positives: 4, negatives: 1, total: 5, threshold: 'warm', excluded: false }
+var session = ps.score;
+// { score: 45, positives: 4, negatives: 1, total: 5, threshold: 'C', excluded: false }
 ```
 
 ### `instance.reset()`
@@ -410,4 +413,12 @@ ps.registerEvent('video_complete', 5);
 ps.registerEvent('scroll', function(context) {
   return context.scroll.threshold >= 90 ? 10 : 2;
 });
+```
+
+### `PreSignal.version`
+
+Static getter that returns the current library version.
+
+```javascript
+console.log(PreSignal.version); // '0.1.0-beta.1'
 ```
