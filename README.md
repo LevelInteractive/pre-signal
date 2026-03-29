@@ -63,9 +63,13 @@ new PreSignal({
     ['A', 80],
     ['S', 100]
   ],
-  ctaPatterns: {
-    text: 'get started|sign up|request a demo',
-    classes: 'btn|button|cta',
+  resolvers: {
+    'gtm.linkClick': {
+      'cta_click': {
+        text: 'get started|sign up|request a demo',
+        classes: 'btn|button|cta',
+      }
+    }
   },
   exclusions: ['login', 'purchase'],
   events: {
@@ -118,15 +122,40 @@ thresholds: [
 ]
 ```
 
-### `ctaPatterns`
+### `resolvers`
 
-Optional. Defines patterns for classifying link clicks as CTA clicks. Both fields accept pipe-delimited strings used as case-insensitive regex patterns. By default this is treated as an `OR` via a `match: 'any'` default. You can change it to an `AND` by setting `match: 'all'`. If the pattern match results in `true`, the event is resolved to `cta_click`. 
+Optional. Defines site-specific rules for resolving raw GTM event names into custom event names. Each top-level key is a raw GTM event name, and each sub-key is the resolved event name. The value is a criteria object that determines when the resolution applies.
+
+Custom resolvers run **after** the built-in auto-resolution logic. If a GTM event is already resolved by the auto-resolver (e.g. `gtm.linkClick` → `email_link_click`), custom resolvers are skipped. They only run when the event name is still the raw GTM name. First match wins — resolvers are evaluated in definition order.
+
+#### Criteria properties
+
+| Property | Type | Description |
+|---|---|---|
+| `selector` | `string` | Runs `element.closest(selector)` on the GTM element. Truthy = pass. |
+| `text` | `string \| RegExp` | Tests against the element's text content (lowercased). Strings are compiled to case-insensitive regex. |
+| `classes` | `string \| RegExp` | Tests against the element's class attribute. Strings are compiled to case-insensitive regex. |
+| `match` | `'any' \| 'all'` | Defaults to `'any'`. Whether ANY or ALL provided criteria must pass. |
+
+#### Example
 
 ```javascript
-ctaPatterns: {
-  text: 'get started|sign up|request a demo',  // partial match against link text
-  classes: 'btn|button|cta',                   // partial match against element classes
-  match: 'any',                                // Default: 'any' (OR), 'all' (AND)
+resolvers: {
+  'gtm.linkClick': {
+    'cta_click': {
+      text: 'get started|sign up|request a demo',
+      classes: 'btn|button|cta',
+      match: 'any',
+    }
+  },
+  'gtm.click': {
+    'accordion_toggle': {
+      selector: '[aria-expanded]',
+    },
+    'tab_click': {
+      selector: '[role="tab"]',
+    }
+  }
 }
 ```
 
@@ -191,7 +220,7 @@ During resolution, relevant auto-event variables are extracted from the dataLaye
 | `gtm.scrollDepth` | `scroll` | `context.url`, `context.scroll` |
 | `gtm.elementVisibility` | `element_impression` | `context.url`, `context.impression` |
 
-Non-GTM events (e.g. custom `dataLayer.push({ event: 'form_submit' })`) pass through with their original name. If a `gtm.*` event doesn't resolve to a named event (e.g. an unclassified `gtm.linkClick`), the raw `gtm.*` event name is used to look up the scoring config — so you can still register a handler for `'gtm.linkClick'` as a catch-all for link clicks that don't match any specific classification.
+Non-GTM events (e.g. custom `dataLayer.push({ event: 'form_submit' })`) pass through with their original name. If a `gtm.*` event doesn't resolve to a named event via the built-in auto-resolver, custom [resolvers](#resolvers) are evaluated next. If no custom resolver matches either, the raw `gtm.*` event name is used to look up the scoring config — so you can still register a handler for `'gtm.linkClick'` as a catch-all for link clicks that don't match any classification.
 
 ### Link click resolution
 
@@ -203,9 +232,8 @@ Non-GTM events (e.g. custom `dataLayer.push({ event: 'form_submit' })`) pass thr
 | `phone_link_click` | `tel:` protocol |
 | `outbound_link_click` | Link hostname differs from the current site's root domain |
 | `file_download` | Link has a `download` attribute, or pathname ends with a known file extension (pdf, docx, xlsx, zip, mp4, etc.) |
-| `cta_click` | Link text or classes match the patterns defined in the [`cta`](#cta) config |
 
-If none of the above match, the event remains as `gtm.linkClick`.
+If none of the above match, the event remains as `gtm.linkClick`. At that point, [custom resolvers](#resolvers) are evaluated if configured for `gtm.linkClick`.
 
 ### Context object
 
